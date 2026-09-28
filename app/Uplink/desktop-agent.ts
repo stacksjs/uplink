@@ -224,6 +224,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         name: 'Read Messages',
         ok: messages !== null,
         detail: messages ? 'Full Disk Access granted' : (messagesError ?? 'Waiting for Full Disk Access'),
+        informational: false,
       },
       ...allEngines(config).map((engine) => {
         const state = engines.get(engine.id)
@@ -245,6 +246,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         name: 'Who can text it',
         ok: allowed.length > 0,
         detail: allowed.length > 0 ? allowed.join(', ') : 'No handles yet. Sign in to Messages, or add your number.',
+        informational: false,
       },
     ]
     // An engine the person has not selected must not hold the app in setup.

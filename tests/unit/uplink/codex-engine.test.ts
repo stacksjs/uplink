@@ -64,8 +64,17 @@ function engine(bin: string, overrides: Partial<{ model: string | null, permissi
   })
 }
 
+/**
+ * The flags, one per line. The prompt is deliberately excluded: it carries the
+ * system prompt and is many lines long, so it would otherwise be scattered
+ * across this array. Use `rawArgsOf` to assert on it.
+ */
 function argsOf(bin: string): string[] {
-  return readFileSync(`${bin}.args`, 'utf8').trim().split('\n')
+  return rawArgsOf(bin).split('\n').filter(line => line.startsWith('-') || !line.includes(' '))
+}
+
+function rawArgsOf(bin: string): string {
+  return readFileSync(`${bin}.args`, 'utf8').trim()
 }
 
 describe('CodexEngine', () => {
@@ -102,9 +111,11 @@ describe('CodexEngine', () => {
     expect(args).toContain('--json')
     expect(args.slice(args.indexOf('--cd'), args.indexOf('--cd') + 2)).toEqual(['--cd', dir])
     expect(args).toContain('--dangerously-bypass-approvals-and-sandbox')
-    // No --append-system-prompt exists, so the instructions ride on the prompt.
-    expect(args[args.length - 1]).toContain('Answer in plain text.')
-    expect(args[args.length - 1]).toContain('scores?')
+    // No --append-system-prompt exists, so the instructions ride on the prompt,
+    // which is why the prompt is many lines and the last argv line is not it.
+    const raw = rawArgsOf(bin)
+    expect(raw).toContain('Answer in plain text.')
+    expect(raw).toEndWith('scores?')
     expect(readFileSync(`${bin}.cwd`, 'utf8').trim()).toEndWith(dir.replace(/^\/private/, ''))
   })
 
