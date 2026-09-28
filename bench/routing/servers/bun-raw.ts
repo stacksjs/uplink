@@ -1,0 +1,68 @@
+/**
+ * The baseline: `Bun.serve` with its native route table.
+ *
+ * Nothing can beat this, which is exactly why it is here. A framework's number
+ * only means something next to the ceiling of the runtime it sits on — without
+ * it, "40k rps" reads as either fast or slow depending on what the reader
+ * already believed.
+ */
+
+import process from 'node:process'
+
+const port = Number(process.env.BENCH_PORT ?? 3999)
+const hostname = '127.0.0.1'
+const withDb = process.env.BENCH_DB === '1'
+const scenario = process.env.BENCH_SCENARIO
+const serves = (id: string) => !scenario || scenario === id
+
+const JSON_HEADERS = { 'content-type': 'application/json' } as const
+const routes: Record<string, any> = {}
+
+let selectItem: import('bun:sqlite').Statement | undefined
+if (withDb && serves('db-roundtrip')) {
+  const { Database } = await import('bun:sqlite')
+  const db = new Database(process.env.BENCH_DB_FILE!, { readonly: true })
+  selectItem = db.prepare('SELECT id, name FROM bench_items WHERE id = ? LIMIT 1')
+}
+
+if (serves('static-json'))
+  routes['/bench/json'] = new Response('{"hello":"world"}', { headers: JSON_HEADERS })
+
+if (serves('path-param')) {
+  routes['/bench/users/:id'] = (req: Request & { params: { id: string } }) =>
+    new Response(JSON.stringify({ id: req.params.id }), { headers: JSON_HEADERS })
+}
+
+if (serves('post-validate')) {
+  routes['/bench/echo'] = {
+    async POST(req: Request) {
+      const body = await req.json() as { name?: unknown, count?: unknown } | unknown[] | null
+      if (!body || Array.isArray(body) || typeof body.name !== 'string' || typeof body.count !== 'number')
+        return new Response('{"errors":{}}', { status: 422, headers: JSON_HEADERS })
+      return new Response(JSON.stringify({ name: body.name, count: body.count }), { headers: JSON_HEADERS })
+    },
+  }
+}
+
+if (selectItem) {
+  routes['/bench/db'] = {
+    GET() {
+      const row = selectItem.get(1) as { id: number, name: string }
+      return new Response(JSON.stringify({ id: row.id, name: row.name }), { headers: JSON_HEADERS })
+    },
+  }
+}
+
+const server = Bun.serve({
+  port,
+  hostname,
+  routes,
+  fetch() {
+    return new Response('Not Found', { status: 404 })
+  },
+})
+
+if (process.env.BENCH_READY_HANDSHAKE === '1')
+  console.log(`{"port":${server.port},"rssBytes":${process.memoryUsage().rss}}`)
+else
+  console.error(`[bench] bun-raw listening on ${server.port}`)

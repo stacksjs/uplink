@@ -1,0 +1,204 @@
+import { describe, expect, it } from 'bun:test'
+import type { MemoryMeasurement } from './report'
+import { EQUAL_RATE_API_PROFILE } from './profile'
+import { memoryMeasurementPublicationIssues, memoryPublicationIssues } from './publication'
+
+function measurement(targetId: string, run: number, over: Partial<MemoryMeasurement> = {}): MemoryMeasurement {
+  return {
+    targetId,
+    run,
+    requestRate: 25_000,
+    settledRssBytes: 100,
+    peakLoadRssBytes: 120,
+    rpsMean: 25_000,
+    requests: 25_000,
+    errors: 0,
+    rawBytes: 512,
+    rawOutputFile: `raw/${targetId}--run${run}.json`,
+    ...over,
+  }
+}
+
+const publishable = {
+  driverPublishable: true,
+  driverVersion: 'oha 1.16.0',
+  platform: 'linux',
+  arch: 'x64',
+  dedicated: true,
+  runtimeRequirement: { range: '1.4.2', matches: true },
+  source: { revision: 'a'.repeat(40), dirty: false },
+  targetIds: EQUAL_RATE_API_PROFILE.map(target => target.targetId),
+  peerVersions: { elysia: '1.4.30', express: '5.2.1', fastify: '5.12.3', hono: '4.13.7' },
+  stacksRuntimeDependencies: {
+    '@stacksjs/bun-router': { version: '0.1.11', path: 'node_modules/@stacksjs/bun-router/dist/index.js' },
+  },
+  scenario: 'static-json',
+  connections: 64,
+  loadSeconds: 60,
+  idleSeconds: 180,
+  sampleIntervalMs: 100,
+  settleSeconds: 10,
+  runs: 3,
+  busyHostProcesses: [],
+}
+
+const responseEvidence = {
+  status: 200,
+  mediaType: 'application/json',
+  bodyBytes: 17,
+  bodySha256: 'a'.repeat(64),
+}
+
+function parityChecks(targetId: string, runs = 3) {
+  const evidence = { primary: responseEvidence, probes: [] }
+  return Array.from({ length: runs }, (_, index) => ({
+    targetId,
+    run: index + 1,
+    before: evidence,
+    after: evidence,
+  }))
+}
+
+describe('memory benchmark publication profile', () => {
+  it('accepts an isolated, reproducible Linux x64 run', () => {
+    expect(memoryPublicationIssues(publishable)).toEqual([])
+  })
+
+  it('explains every unmet prerequisite', () => {
+    expect(memoryPublicationIssues({
+      ...publishable,
+      driverPublishable: false,
+      driverVersion: null,
+      platform: 'darwin',
+      arch: 'arm64',
+      dedicated: false,
+      runtimeRequirement: { range: '1.4.2', matches: false },
+      source: { revision: null, dirty: null },
+      targetIds: ['stacks-warm'],
+      peerVersions: {},
+      stacksRuntimeDependencies: {
+        '@stacksjs/bun-router': { version: 'unavailable', path: 'unavailable' },
+      },
+      scenario: 'db-roundtrip',
+      connections: 16,
+      loadSeconds: 10,
+      idleSeconds: 20,
+      sampleIntervalMs: 250,
+      settleSeconds: 5,
+      runs: 1,
+      busyHostProcesses: [{ pid: 42, cpuPercent: 90, command: 'compiler' }],
+    })).toEqual([
+      'load generator is not publishable',
+      'load generator version is unavailable',
+      'host OS is darwin, not linux',
+      'host architecture is arm64, not x64',
+      'BENCH_DEDICATED=1 is not set',
+      'runtime does not match package.json engines.bun',
+      'source revision is unavailable or the working tree is not clean',
+      'Stacks runtime dependency is unavailable for @stacksjs/bun-router',
+      'target set does not match the equal-rate API profile',
+      'scenario is db-roundtrip, not static-json',
+      'connection count is 16, not 64',
+      'load window is 10s, not 60s',
+      'idle window is 20s, not 180s',
+      'sampling interval is 250ms, not 100ms',
+      'settled window is 5s, not 10s',
+      'only 1 fresh-process run(s) were requested; at least 3 are required',
+      'competing host processes were observed',
+    ])
+  })
+
+  it('rejects missing, extra, and duplicate comparison targets', () => {
+    expect(memoryPublicationIssues({ ...publishable, targetIds: ['stacks-warm'] })).toContain('target set does not match the equal-rate API profile')
+    expect(memoryPublicationIssues({ ...publishable, targetIds: [...publishable.targetIds, 'stacks-wal-full'] })).toContain('target set does not match the equal-rate API profile')
+    expect(memoryPublicationIssues({ ...publishable, targetIds: publishable.targetIds.map(() => 'stacks-warm') })).toContain('target set does not match the equal-rate API profile')
+  })
+
+  it('rejects an unidentified peer framework build', () => {
+    expect(memoryPublicationIssues({
+      ...publishable,
+      peerVersions: { ...publishable.peerVersions, hono: 'unavailable' },
+    })).toContain('peer framework version is unavailable for hono')
+  })
+
+  it('accepts complete, stable, error-free fixed-rate measurements', () => {
+    expect(memoryMeasurementPublicationIssues(
+      [{ id: 'stacks-warm', requestRate: 25_000 }],
+      [
+        measurement('stacks-warm', 1, { rpsMean: 24_500, requests: 24_500 }),
+        measurement('stacks-warm', 2, { settledRssBytes: 102, peakLoadRssBytes: 121, rpsMean: 24_750, requests: 24_750 }),
+        measurement('stacks-warm', 3, { settledRssBytes: 101, peakLoadRssBytes: 122 }),
+      ],
+      3,
+      parityChecks('stacks-warm'),
+    )).toEqual([])
+  })
+
+  it('rejects skipped, incomplete, invalid, failed, under-rate, and unstable measurements', () => {
+    expect(memoryMeasurementPublicationIssues(
+      [
+        { id: 'express', requestRate: 25_000, skipped: 'dependency unavailable' },
+        { id: 'stacks-warm', requestRate: 25_000 },
+      ],
+      [
+        measurement('stacks-warm', 1, { rpsMean: 23_000, requests: 23_000, errors: 1 }),
+        measurement('stacks-warm', 1, { settledRssBytes: 120, peakLoadRssBytes: 0, rpsMean: 24_750, requests: 24_750 }),
+      ],
+      2,
+      [],
+    )).toEqual([
+      'express was skipped',
+      'stacks-warm completed 1 of 2 required run(s)',
+      'stacks-warm contains an invalid measurement',
+      'stacks-warm recorded 1 request error(s)',
+      'stacks-warm missed 98% fixed-rate attainment in run(s) 1',
+      'stacks-warm settled RSS exceeded the 10% stability range',
+    ])
+  })
+
+  it('rejects targets and rates outside the declared comparison profile', () => {
+    expect(memoryMeasurementPublicationIssues(
+      [{ id: 'stacks-wal-full', requestRate: 40_000 }, { id: 'bun-raw', requestRate: 25_000 }],
+      [],
+      3,
+      [],
+    )).toEqual([
+      'stacks-wal-full is not in the equal-rate API memory profile',
+      'stacks-wal-full completed 0 of 3 required run(s)',
+      'bun-raw completed 0 of 3 required run(s)',
+    ])
+    expect(memoryMeasurementPublicationIssues(
+      [{ id: 'bun-raw', requestRate: 40_000 }],
+      [],
+      3,
+      [],
+    )).toEqual([
+      'bun-raw requested 40000 req/s, not the profile rate of 25000 req/s',
+      'bun-raw completed 0 of 3 required run(s)',
+    ])
+  })
+
+  it('rejects missing, malformed, and changing parity evidence', () => {
+    const measurements = [1, 2, 3].map(run => measurement('stacks-warm', run))
+    const malformed = parityChecks('stacks-warm')
+    malformed[0] = {
+      ...malformed[0]!,
+      after: { primary: { ...responseEvidence, bodyBytes: -1 }, probes: [] },
+    }
+    expect(memoryMeasurementPublicationIssues(
+      [{ id: 'stacks-warm', requestRate: 25_000 }],
+      measurements,
+      3,
+      malformed,
+    )).toEqual([
+      'stacks-warm contains invalid parity evidence',
+      'stacks-warm changed parity evidence across load and idle',
+    ])
+    expect(memoryMeasurementPublicationIssues(
+      [{ id: 'stacks-warm', requestRate: 25_000 }],
+      measurements,
+      3,
+      parityChecks('stacks-warm', 2),
+    )).toContain('stacks-warm did not retain 3 required parity check(s)')
+  })
+})

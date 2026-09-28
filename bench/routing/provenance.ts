@@ -1,0 +1,108 @@
+import process from 'node:process'
+import { readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+
+export const STACKS_RUNTIME_PACKAGES = ['@stacksjs/bun-router'] as const
+
+export type StacksRuntimeDependencies = Record<typeof STACKS_RUNTIME_PACKAGES[number], {
+  version: string
+  path: string
+}>
+
+export const STACKS_FIXTURE_MODULES = [
+  '@stacksjs/actions',
+  '@stacksjs/database/runtime',
+  '@stacksjs/query-builder',
+  '@stacksjs/router',
+  '@stacksjs/router/runtime',
+  '@stacksjs/validation',
+] as const
+
+export const STACKS_BENCHMARK_MODULES = [
+  ...STACKS_FIXTURE_MODULES,
+  '@stacksjs/database/replicas',
+] as const
+
+export type StacksBenchmarkModule = typeof STACKS_BENCHMARK_MODULES[number]
+export type StacksSourceModules = Record<StacksBenchmarkModule, string>
+
+/** Resolve package specifiers with the executable context used by target servers. */
+export function benchmarkServerModuleCommand(repoRoot: string, specifiers: readonly string[], importer?: string): string[] {
+  return [
+    process.execPath,
+    '--no-env-file',
+    `--config=${join(repoRoot, 'bench', 'routing', 'bunfig.toml')}`,
+    join(repoRoot, 'bench', 'routing', 'fixtures', 'source-probe.ts'),
+    ...(importer ? ['--importer', importer] : []),
+    ...specifiers,
+  ]
+}
+
+/** Resolve package specifiers with the executable context used by target servers. */
+export function resolveBenchmarkServerModules(repoRoot: string, specifiers: readonly string[], importer?: string): Record<string, string> {
+  if (specifiers.length === 0)
+    return {}
+
+  const probe = Bun.spawnSync(benchmarkServerModuleCommand(repoRoot, specifiers, importer), {
+    cwd: repoRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  if (probe.exitCode !== 0)
+    throw new Error(`Could not resolve modules in the benchmark server environment: ${probe.stderr.toString().trim()}`)
+
+  const modules = JSON.parse(probe.stdout.toString()) as Record<string, string>
+  for (const specifier of specifiers) {
+    if (typeof modules[specifier] !== 'string')
+      throw new TypeError(`Benchmark server source probe did not resolve ${specifier}`)
+  }
+  return modules
+}
+
+export function stacksSourceIssues(repoRoot: string, modules: StacksSourceModules): string[] {
+  const issues: string[] = []
+  for (const specifier of STACKS_BENCHMARK_MODULES) {
+    const packageName = specifier.slice('@stacksjs/'.length).split('/', 1)[0]!
+    const expectedRoot = resolve(repoRoot, 'storage', 'framework', 'core', packageName, 'src')
+    const resolvedPath = resolve(modules[specifier])
+    const fromExpectedRoot = relative(expectedRoot, resolvedPath)
+    if (fromExpectedRoot === '..' || fromExpectedRoot.startsWith(`..${sep}`) || resolve(expectedRoot, fromExpectedRoot) !== resolvedPath)
+      issues.push(`${specifier} resolved outside ${expectedRoot}: ${resolvedPath}`)
+  }
+  return issues
+}
+
+export function resolveStacksSourceModules(repoRoot: string): StacksSourceModules {
+  const modules = resolveBenchmarkServerModules(repoRoot, STACKS_BENCHMARK_MODULES) as StacksSourceModules
+  const issues = stacksSourceIssues(repoRoot, modules)
+  if (issues.length > 0)
+    throw new Error(`Stacks benchmark must execute framework source through public package entry points:\n${issues.join('\n')}`)
+
+  return Object.fromEntries(Object.entries(modules).map(([specifier, path]) => [
+    specifier,
+    relative(repoRoot, path),
+  ])) as StacksSourceModules
+}
+
+/** Identify published runtime packages that supply the measured Stacks path. */
+export function resolveStacksRuntimeDependencies(repoRoot: string): StacksRuntimeDependencies {
+  const specifiers = STACKS_RUNTIME_PACKAGES.flatMap(packageName => [packageName, `${packageName}/package.json`])
+  // The runtime is a dependency of the framework router, not of the fixture.
+  // Package-scoped installs can give each importer a different version.
+  const modules = resolveBenchmarkServerModules(repoRoot, specifiers, '@stacksjs/router')
+
+  return Object.fromEntries(STACKS_RUNTIME_PACKAGES.map((packageName) => {
+    const entry = resolve(modules[packageName]!)
+    const manifestFile = resolve(modules[`${packageName}/package.json`]!)
+    const packageRoot = dirname(manifestFile)
+    const fromPackageRoot = relative(packageRoot, entry)
+    if (fromPackageRoot === '..' || fromPackageRoot.startsWith(`..${sep}`))
+      throw new Error(`${packageName} resolved outside its package root: ${entry}`)
+
+    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as { version?: unknown }
+    return [packageName, {
+      version: typeof manifest.version === 'string' ? manifest.version : 'unavailable',
+      path: relative(repoRoot, entry),
+    }]
+  })) as StacksRuntimeDependencies
+}

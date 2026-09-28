@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'bun:test'
+import { median, rateAttainmentPercent, renderMemoryReport } from './report'
+
+describe('memory benchmark report', () => {
+  it('calculates medians for odd and even sample counts', () => {
+    expect(median([3, 1, 2])).toBe(2)
+    expect(median([8, 2, 6, 4])).toBe(5)
+  })
+
+  it('calculates fixed-rate attainment', () => {
+    expect(rateAttainmentPercent(39_200, 40_000)).toBe(98)
+  })
+
+  it('reports settled RSS and run spread in MiB', () => {
+    const report = renderMemoryReport({
+      meta: {
+        startedAt: '2026-09-04T00:00:00.000Z',
+        source: { revision: 'a'.repeat(40), dirty: true },
+        sourceAtEnd: { revision: 'b'.repeat(40), dirty: false },
+        runtimeRequirement: { range: '1.4.2', matches: true },
+        driver: 'oha',
+        driverVersion: 'oha 1.16.0',
+        loadTopology: 'same-host',
+        peerVersions: { elysia: '1.4.30', hono: '4.13.5' },
+        stacksRuntimeDependencies: {
+          '@stacksjs/bun-router': { version: '0.1.11', path: 'node_modules/@stacksjs/bun-router/dist/index.js' },
+        },
+        publishable: true,
+        scenario: 'static-json',
+        connections: 64,
+        loadSeconds: 60,
+        idleSeconds: 180,
+        sampleIntervalMs: 100,
+        settleSeconds: 10,
+        runs: 2,
+        machine: {
+          arch: 'x64',
+          platform: 'linux',
+          release: '6.0',
+          cpu: 'Test CPU',
+          cores: 8,
+          bun: '1.4.2',
+        },
+      },
+      targets: [{ id: 'stacks', label: 'Stacks', requestRate: 40_000 }],
+      measurements: [
+        { targetId: 'stacks', run: 1, requestRate: 40_000, settledRssBytes: 100 * 1024 * 1024, peakLoadRssBytes: 150 * 1024 * 1024, rpsMean: 39_900, requests: 2_394_000, errors: 0, rawBytes: 512, rawOutputFile: 'raw/stacks--run1.json' },
+        { targetId: 'stacks', run: 2, requestRate: 40_000, settledRssBytes: 120 * 1024 * 1024, peakLoadRssBytes: 170 * 1024 * 1024, rpsMean: 40_000, requests: 2_400_000, errors: 1, rawBytes: 512, rawOutputFile: 'raw/stacks--run2.json' },
+      ],
+    })
+
+    expect(report).toContain(`| Source at start | \`${'a'.repeat(40)}\` (modified working tree) |`)
+    expect(report).toContain(`| Source at end | \`${'b'.repeat(40)}\` (clean working tree) |`)
+    expect(report).toContain('| Runtime | Bun 1.4.2 |')
+    expect(report).toContain('| Project Bun requirement | 1.4.2 (matched) |')
+    expect(report).toContain('| Load generator version | oha 1.16.0 |')
+    expect(report).toContain('| Load topology | same host as target server |')
+    expect(report).toContain('| Peer framework versions | `elysia`: 1.4.30<br>`hono`: 4.13.5 |')
+    expect(report).toContain('| Stacks runtime dependencies | `@stacksjs/bun-router`: 0.1.11 at `node_modules/@stacksjs/bun-router/dist/index.js` |')
+    expect(report).toContain('| Architecture | x64 |')
+    expect(report).not.toContain('Runtime mismatch:')
+    expect(report).toContain('| Stacks | 40,000 | 39,950 | 99.9% | 110.0 | 100.0-120.0 | 160.0 | 1 |')
+  })
+
+  it('flags a runtime comparison without hiding the measured runtime', () => {
+    const report = renderMemoryReport({
+      meta: {
+        startedAt: '2026-09-05T00:00:00Z', driver: 'oha', loadTopology: 'same-host', publishable: true,
+        scenario: 'static-json', connections: 64, loadSeconds: 60, idleSeconds: 180,
+        sampleIntervalMs: 100, settleSeconds: 10, runs: 1,
+        machine: { arch: 'x64', platform: 'linux', release: 'test', cpu: 'test', cores: 1, bun: '1.3.14' },
+        runtimeRequirement: { range: '1.4.2', matches: false },
+      },
+      targets: [], measurements: [],
+    })
+    expect(report).toContain('| Runtime | Bun 1.3.14 |')
+    expect(report).toContain('| Project Bun requirement | 1.4.2 (runtime mismatch) |')
+    expect(report).toContain('Runtime mismatch: Bun 1.3.14 does not satisfy package.json engines.bun (1.4.2).')
+  })
+
+  it('flags a busy-host override as non-publishable', () => {
+    const report = renderMemoryReport({
+      meta: {
+        startedAt: '2026-09-05T00:00:00Z', driver: 'oha', loadTopology: 'same-host', publishable: false,
+        scenario: 'static-json', connections: 64, loadSeconds: 60, idleSeconds: 180,
+        sampleIntervalMs: 100, settleSeconds: 10, runs: 1,
+        busyHostProcesses: [{ pid: 20, cpuPercent: 88.44, command: 'compiler' }],
+        machine: { arch: 'x64', platform: 'linux', release: 'test', cpu: 'test', cores: 1, bun: '1.4.2' },
+      },
+      targets: [], measurements: [],
+    })
+    expect(report).toContain('**Busy-host override.** compiler (PID 20, 88.4% CPU). This run is direction-only and must not be published.')
+  })
+
+  it('lists publication blockers', () => {
+    const report = renderMemoryReport({
+      meta: {
+        startedAt: '2026-09-05T00:00:00Z', driver: 'oha', loadTopology: 'same-host', publishable: false,
+        publicationIssues: ['host architecture is arm64, not x64', 'only 1 fresh-process run(s) were requested; at least 3 are required'],
+        scenario: 'static-json', connections: 64, loadSeconds: 60, idleSeconds: 180,
+        sampleIntervalMs: 100, settleSeconds: 10, runs: 1,
+        machine: { arch: 'arm64', platform: 'linux', release: 'test', cpu: 'test', cores: 1, bun: '1.4.2' },
+      },
+      targets: [], measurements: [],
+    })
+    expect(report).toContain('**Publication blockers.** host architecture is arm64, not x64; only 1 fresh-process run(s) were requested; at least 3 are required.')
+  })
+})

@@ -1,0 +1,129 @@
+/**
+ * What gets measured, and under which profile.
+ *
+ * `cookie: true` makes the load generator echo a CSRF cookie on every request,
+ * which is what a browser does from its second request onward. Without it the
+ * run measures a cold first visit repeated for thirty seconds, and Stacks mints
+ * a render token every time. Both are real; the README says which row is which.
+ */
+
+export interface Target {
+  id: string
+  label: string
+  /** File under `servers/`. */
+  server: string
+  env?: Record<string, string>
+  /** Send the CSRF cookie a returning client would have. */
+  cookie?: boolean
+  /** Absent from this repo's dependencies; skipped rather than failed. */
+  optional?: boolean
+  /** Tuned profiles must be selected explicitly. */
+  optIn?: boolean
+}
+
+export const TARGETS: readonly Target[] = [
+  {
+    id: 'stacks',
+    label: 'Stacks (stock defaults, cold client)',
+    server: 'stacks.ts',
+  },
+  {
+    id: 'stacks-warm',
+    label: 'Stacks (stock defaults, client echoes CSRF cookie)',
+    server: 'stacks.ts',
+    cookie: true,
+  },
+  {
+    id: 'stacks-no-csrf',
+    label: 'Stacks (request IDs and security headers on, CSRF off)',
+    server: 'stacks.ts',
+    env: { BENCH_CSRF: 'false' },
+    cookie: true,
+    optIn: true,
+  },
+  {
+    id: 'stacks-no-request-ids',
+    label: 'Stacks (CSRF and security headers on, request IDs off)',
+    server: 'stacks.ts',
+    env: { BENCH_REQUEST_IDS: 'false' },
+    cookie: true,
+    optIn: true,
+  },
+  {
+    id: 'stacks-no-security-headers',
+    label: 'Stacks (CSRF and request IDs on, security headers off)',
+    server: 'stacks.ts',
+    env: { STACKS_SECURITY_HEADERS_DISABLE: 'true' },
+    cookie: true,
+    optIn: true,
+  },
+  {
+    id: 'stacks-wal-full',
+    label: 'Stacks (tuned WAL: 1000 pages, FULL sync, cookie echo)',
+    server: 'stacks.ts',
+    env: { BENCH_SQLITE_PROFILE: 'wal-full' },
+    cookie: true,
+    optIn: true,
+  },
+  {
+    id: 'stacks-no-context',
+    label: 'Stacks (minimal profile, ambient request scope off)',
+    server: 'stacks.ts',
+    env: { BENCH_MODE: 'minimal', STACKS_SECURITY_HEADERS_DISABLE: 'true', BENCH_REQUEST_CONTEXT: 'false' },
+    optIn: true,
+  },
+  {
+    id: 'stacks-minimal',
+    label: 'Stacks (proxy IDs, security headers and CSRF off)',
+    server: 'stacks.ts',
+    env: { BENCH_MODE: 'minimal', STACKS_SECURITY_HEADERS_DISABLE: 'true' },
+  },
+  {
+    id: 'stacks-root',
+    label: 'Stacks (root compatibility entry, minimal API profile)',
+    server: 'stacks.ts',
+    env: { BENCH_MODE: 'minimal', STACKS_SECURITY_HEADERS_DISABLE: 'true', BENCH_ROUTER_ENTRY: 'root' },
+    optIn: true,
+  },
+  {
+    id: 'elysia',
+    label: 'Elysia',
+    server: 'elysia.ts',
+    optional: true,
+  },
+  {
+    id: 'express',
+    label: 'Express',
+    server: 'express.ts',
+    optional: true,
+  },
+  {
+    id: 'fastify',
+    label: 'Fastify',
+    server: 'fastify.ts',
+    optional: true,
+  },
+  {
+    id: 'hono',
+    label: 'Hono',
+    server: 'hono.ts',
+    optional: true,
+  },
+  {
+    id: 'bun-router',
+    label: 'bun-router (the routing runtime Stacks sits on)',
+    server: 'bun-router.ts',
+    optIn: true,
+  },
+  {
+    id: 'bun-raw',
+    label: 'Bun.serve baseline',
+    server: 'bun-raw.ts',
+  },
+]
+
+export const DEFAULT_TARGETS: readonly Target[] = TARGETS.filter(target => !target.optIn)
+
+export function targetById(id: string): Target | undefined {
+  return TARGETS.find(t => t.id === id)
+}

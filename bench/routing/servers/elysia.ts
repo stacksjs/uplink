@@ -1,0 +1,56 @@
+/**
+ * Elysia under test, if it is installed.
+ *
+ * The benchmark package pins Elysia and its lockfile. If dependencies have not
+ * been installed, the process exits 78 and the runner records the framework as
+ * skipped rather than as a zero.
+ */
+
+import process from 'node:process'
+
+const port = Number(process.env.BENCH_PORT ?? 3999)
+const hostname = '127.0.0.1'
+const withDb = process.env.BENCH_DB === '1'
+const scenario = process.env.BENCH_SCENARIO
+const serves = (id: string) => !scenario || scenario === id
+
+let Elysia: any
+let t: any
+try {
+  ;({ Elysia, t } = await import('elysia') as any)
+}
+catch {
+  console.error('[bench] elysia is not installed, run `bun install --cwd bench/routing --frozen-lockfile`')
+  process.exit(78)
+}
+
+const app = new Elysia()
+if (serves('static-json'))
+  app.get('/bench/json', () => ({ hello: 'world' }))
+if (serves('path-param'))
+  app.get('/bench/users/:id', ({ params }: any) => ({ id: params.id }))
+if (serves('post-validate')) {
+  app.post(
+    '/bench/echo',
+    ({ body }: any) => ({ name: body.name, count: body.count }),
+    { body: t.Object({ name: t.String(), count: t.Number() }) },
+  )
+}
+
+if (withDb && serves('db-roundtrip')) {
+  const { Database } = await import('bun:sqlite')
+  const db = new Database(process.env.BENCH_DB_FILE!, { readonly: true })
+  const selectItem = db.prepare('SELECT id, name FROM bench_items WHERE id = ? LIMIT 1')
+  app.get('/bench/db', () => {
+    const row = selectItem.get(1) as { id: number, name: string }
+    return { id: row.id, name: row.name }
+  })
+}
+
+app.listen({ port, hostname })
+if (!app.server)
+  throw new Error('Elysia did not expose its listening server')
+if (process.env.BENCH_READY_HANDSHAKE === '1')
+  console.log(`{"port":${app.server.port},"rssBytes":${process.memoryUsage().rss}}`)
+else
+  console.error(`[bench] elysia listening on ${app.server.port}`)

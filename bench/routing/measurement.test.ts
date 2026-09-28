@@ -1,0 +1,180 @@
+import type { Driver, LoadRequest, LoadResult } from './drivers'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { calculateCpuWindow, cpuMicrosPerRequest, measureLoad, processCpuSample, processCpuSeconds } from './measurement'
+
+const result: LoadResult = {
+  rpsMean: 42,
+  rpsP50: 42,
+  latencyMs: { p50: 1, p90: 2, p99: 3 },
+  requests: 42,
+  errors: 0,
+  raw: 'measured output',
+}
+
+describe('benchmark CPU window', () => {
+  it('prefers Linux proc ticks over whole-second ps output', async () => {
+    const procRoot = await mkdtemp(join(tmpdir(), 'stacks-routing-proc-'))
+    const pid = 123
+    await mkdir(join(procRoot, String(pid)))
+    const beforeCpu = ['S', '1', '1', '0', '-1', '4194304', '900', '0', '0', '0', '0']
+    await writeFile(join(procRoot, String(pid), 'stat'), `${pid} (bench server) ${beforeCpu.join(' ')} 123 45 0 0 0`)
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(() => {
+      throw new Error('ps must not run when proc is readable')
+    })
+    try {
+      expect(await processCpuSample(pid, 'linux', procRoot, 100)).toEqual({ seconds: 1.68, source: 'proc' })
+      expect(await processCpuSeconds(pid, 'linux', procRoot, 100)).toBe(1.68)
+    }
+    finally {
+      spawn.mockRestore()
+      await rm(procRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to ps when Linux proc data is unavailable', async () => {
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(() => ({
+      stdout: new Response('00:07.25').body,
+    }) as unknown as ReturnType<typeof Bun.spawn>)
+    try {
+      expect(await processCpuSample(123, 'linux', '/missing-proc-root', null)).toEqual({ seconds: 7.25, source: 'ps' })
+      expect(await processCpuSeconds(123, 'linux', '/missing-proc-root', null)).toBe(7.25)
+    }
+    finally {
+      spawn.mockRestore()
+    }
+  })
+
+  it('records stable, mixed, and missing CPU sample sources', () => {
+    expect(calculateCpuWindow(
+      { seconds: 1, source: 'proc' },
+      { seconds: 1.5, source: 'proc' },
+      2,
+    )).toEqual({ cpuSeconds: 0.5, cpuPercent: 25, cpuSource: 'proc' })
+    expect(calculateCpuWindow(
+      { seconds: 1, source: 'proc' },
+      { seconds: 1.5, source: 'ps' },
+      2,
+    )).toEqual({ cpuSeconds: 0.5, cpuPercent: 25, cpuSource: 'mixed' })
+    expect(calculateCpuWindow(null, { seconds: 1.5, source: 'ps' }, 2))
+      .toEqual({ cpuSeconds: null, cpuPercent: null, cpuSource: null })
+  })
+
+  it.each([0, 3])('excludes %s seconds of warmup CPU and wall time', async (warmupSeconds) => {
+    let cpu = 0
+    let wall = 0
+    const requests: LoadRequest[] = []
+    const request: LoadRequest = {
+      url: 'http://127.0.0.1:39400/bench/echo',
+      method: 'POST',
+      body: '{"name":"bench","count":7}',
+      headers: { 'content-type': 'application/json' },
+      connections: 7,
+      requestRate: 100,
+      warmupSeconds,
+      durationSeconds: 1,
+    }
+    const driver: Driver = {
+      name: 'fixture',
+      version: async () => 'fixture 1.0.0',
+      publishable: false,
+      supportsFixedRate: true,
+      isAvailable: async () => true,
+      async run(load) {
+        requests.push(load)
+        // A busy warmup and a mostly idle measured window make mixing the
+        // two visible in the reported percentage, without timing a real CPU.
+        cpu += load.warmupSeconds
+        wall += load.warmupSeconds * 1000
+        cpu += load.durationSeconds === 1 ? 0.1 : load.durationSeconds
+        wall += load.durationSeconds * 1000
+        return load.durationSeconds === 1 ? result : { ...result, requests: 999, raw: 'warmup output' }
+      },
+    }
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(() => ({
+      stdout: new Response(`00:${cpu.toFixed(2)}`).body,
+    }) as unknown as ReturnType<typeof Bun.spawn>)
+    const now = spyOn(performance, 'now').mockImplementation(() => wall)
+    try {
+      const measured = await measureLoad(driver, request, 123)
+      expect(measured.cpuPercent).toBeCloseTo(10, 8)
+      expect(measured.result).toBe(result)
+      expect(measured.warmupResult).toEqual(warmupSeconds > 0 ? { ...result, requests: 999, raw: 'warmup output' } : null)
+      expect(requests).toEqual(warmupSeconds > 0
+        ? [{ ...request, warmupSeconds: 0, durationSeconds: warmupSeconds }, { ...request, warmupSeconds: 0 }]
+        : [{ ...request, warmupSeconds: 0 }])
+    }
+    finally {
+      now.mockRestore()
+      spawn.mockRestore()
+    }
+  })
+})
+
+// ps emits minutes, hours, and a day prefix as the accumulated CPU time grows.
+// Drive the reported percentage through the sampler, including boundary changes.
+describe('cumulative CPU time formats', () => {
+  it.each([
+    ['minute boundary', '00:59.90', '01:00.10', 20],
+    ['hour boundary', '59:59.90', '01:00:00.10', 20],
+    ['first day boundary', '23:59:59.90', '1-00:00:00.10', 20],
+    ['later day boundary', '1-23:59:59.90', '2-00:00:00.10', 20],
+    ['day and hours', '2-03:00:00', '2-03:00:01', 100],
+    ['missing sample', '', '00:00.10', null],
+    ['malformed sample', '00:00oops', '00:00.10', null],
+  ] as const)('%s', async (name, before, after, expected) => {
+    let wall = 0
+    let sample: string = before
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(() => ({
+      stdout: new Response(sample).body,
+    }) as unknown as ReturnType<typeof Bun.spawn>)
+    const now = spyOn(performance, 'now').mockImplementation(() => wall)
+    try {
+      const measured = await measureLoad({
+        name,
+        version: async () => 'fixture 1.0.0',
+        publishable: false,
+        supportsFixedRate: false,
+        isAvailable: async () => true,
+        async run() {
+          wall = 1000
+          sample = after
+          return result
+        },
+      }, {
+        url: 'http://127.0.0.1:39400/bench/json',
+        method: 'GET',
+        headers: {},
+        connections: 1,
+        warmupSeconds: 0,
+        durationSeconds: 1,
+      }, 123)
+      if (expected == null) expect(measured.cpuPercent).toBeNull()
+      else expect(measured.cpuPercent).toBeCloseTo(expected, 6)
+      expect(measured.result).toBe(result)
+    }
+    finally {
+      now.mockRestore()
+      spawn.mockRestore()
+    }
+  })
+})
+
+describe('per-request CPU cost', () => {
+  it('divides the measured CPU window by the requests it covered', () => {
+    // 1.2 CPU seconds over 100,000 requests is 12 microseconds each.
+    expect(cpuMicrosPerRequest(1.2, 100_000)).toBeCloseTo(12, 10)
+  })
+
+  it.each([
+    ['no CPU evidence', null, 100],
+    ['a non-finite reading', Number.NaN, 100],
+    ['a negative reading', -1, 100],
+    ['no requests', 1, 0],
+    ['a negative request count', 1, -5],
+  ])('reports %s as unmeasured rather than as a cheap row', (_label, cpuSeconds, requests) => {
+    expect(cpuMicrosPerRequest(cpuSeconds, requests)).toBeNull()
+  })
+})

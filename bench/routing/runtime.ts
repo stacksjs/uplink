@@ -1,0 +1,326 @@
+/** Shared server lifecycle and parity checks for the benchmark suites. */
+
+import type { Scenario, ScenarioProbe } from './scenarios'
+import type { Target } from './targets'
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import { assertFixtureQueryLogged, resetFixtureLogs } from './fixture'
+import { CSRF_COOKIE, CSRF_TOKEN } from './scenarios'
+
+export const BENCH_ROOT = fileURLToPath(new URL('.', import.meta.url))
+export const REPO_ROOT = join(BENCH_ROOT, '..', '..')
+export const TMP = join(BENCH_ROOT, '.tmp')
+export const FIXTURE = join(TMP, 'bench.sqlite')
+export const PORT = Number(process.env.BENCH_PORT ?? 39400)
+
+/** Persistent query history is opt-in for the production benchmark. */
+export function benchmarkQueryLoggingEnabled(): boolean {
+  const value = process.env.DB_QUERY_LOGGING_ENABLED?.toLowerCase()
+  return value === 'true' || value === '1'
+}
+
+export interface BootedServer {
+  proc: ReturnType<typeof Bun.spawn>
+  pid: number
+}
+
+export interface ResponseParityEvidence {
+  status: number
+  mediaType: string | null
+  bodyBytes: number
+  bodySha256: string
+}
+
+export interface ScenarioParityEvidence {
+  primary: ResponseParityEvidence
+  probes: Array<{ id: string, response: ResponseParityEvidence }>
+}
+
+export function isValidParityEvidence(evidence: ScenarioParityEvidence, expectedProbeIds: readonly string[]): boolean {
+  const responses = [evidence.primary, ...evidence.probes.map(probe => probe.response)]
+  return evidence.primary.status === 200
+    && evidence.primary.mediaType === 'application/json'
+    && evidence.probes.length === expectedProbeIds.length
+    && evidence.probes.every((probe, index) => probe.id === expectedProbeIds[index])
+    && responses.every(response => Number.isSafeInteger(response.status)
+      && response.status >= 100 && response.status <= 599
+      && (response.mediaType === null || typeof response.mediaType === 'string')
+      && Number.isSafeInteger(response.bodyBytes) && response.bodyBytes >= 0
+      && /^[a-f\d]{64}$/.test(response.bodySha256))
+}
+
+function responseParityEvidence(status: number, mediaType: string | null, body: string): ResponseParityEvidence {
+  return {
+    status,
+    mediaType,
+    bodyBytes: Buffer.byteLength(body),
+    bodySha256: createHash('sha256').update(body).digest('hex'),
+  }
+}
+
+/** Keep benchmark targets out of the application's preload graph. */
+export function serverCommand(server: string): string[] {
+  return [
+    process.execPath,
+    `--config=${join(BENCH_ROOT, 'bunfig.toml')}`,
+    '--no-env-file',
+    join(BENCH_ROOT, 'servers', server),
+  ]
+}
+
+/**
+ * What a benchmark server inherits from the machine it runs on.
+ *
+ * Not the whole parent environment. The runner boots through the repository's
+ * own bunfig, which preloads `.env`, so spreading `process.env` handed every
+ * server the developer's application configuration - and only the Stacks
+ * targets read any of it. The child command also disables Bun's automatic
+ * env-file loading; filtering the inherited environment would otherwise be
+ * undone as soon as Bun started in the repository root. A stray `STACKS_CSP`
+ * adds a header to every Stacks response and to nobody else's; a stray
+ * query-logging threshold changes the database row for one framework. Two
+ * people on the same commit would measure different things, and the difference
+ * would land entirely on one target.
+ *
+ * So the host contributes only what a process needs to run at all, and the
+ * benchmark states everything else explicitly. `NODE_OPTIONS` is deliberately
+ * absent: it can inject a loader into one process and not another.
+ */
+const HOST_ENVIRONMENT = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TERM',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'TZ',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'BUN_INSTALL',
+  'BUN_INSTALL_CACHE_DIR',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  // Windows needs these to start a process at all.
+  'APPDATA',
+  'COMSPEC',
+  'LOCALAPPDATA',
+  'PATHEXT',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'SYSTEMDRIVE',
+  'SYSTEMROOT',
+  'USERPROFILE',
+  'WINDIR',
+] as const
+
+/**
+ * Benchmark switches the README documents as opt-in, passed through when set.
+ *
+ * `DB_QUERY_LOGGING_ENABLED` turns the database scenario into an
+ * observability-cost profile. The runner already reads it to label the report,
+ * so the server it describes has to see the same value.
+ */
+const FORWARDED_ENVIRONMENT = ['DB_QUERY_LOGGING_ENABLED'] as const
+
+export function hostEnvironment(source: Record<string, string | undefined> = process.env): Record<string, string> {
+  const environment: Record<string, string> = {}
+  for (const name of [...HOST_ENVIRONMENT, ...FORWARDED_ENVIRONMENT]) {
+    const value = source[name]
+    if (value != null)
+      environment[name] = value
+    // Windows environment names are case-insensitive but arrive capitalized.
+    const actual = Object.keys(source).find(key => key.toUpperCase() === name && key !== name)
+    if (actual != null && source[actual] != null)
+      environment[actual] = source[actual]
+  }
+  return environment
+}
+
+/** Give every framework the same production environment. */
+export function serverEnvironment(target: Target, withDb: boolean, scenarioId?: string): Record<string, string> {
+  return {
+    ...hostEnvironment(),
+    APP_ENV: 'production',
+    NODE_ENV: 'production',
+    BENCH_PORT: String(PORT),
+    BENCH_DB: withDb ? '1' : '0',
+    BENCH_DB_FILE: FIXTURE,
+    DB_CONNECTION: 'sqlite',
+    DB_DATABASE_PATH: FIXTURE,
+    BENCH_SCENARIO: scenarioId ?? '',
+    BENCH_MODE: 'secure',
+    BENCH_REQUEST_CONTEXT: 'true',
+    BENCH_ROUTER_ENTRY: 'runtime',
+    BENCH_SQLITE_PROFILE: 'stock',
+    STACKS_SECURITY_HEADERS_DISABLE: 'false',
+    ...target.env,
+  } as Record<string, string>
+}
+
+/** Start a target with a deadline for HTTP readiness and clean up failed starts. */
+export async function boot(target: Target, withDb: boolean, scenario?: Scenario, timeoutMs = 60_000): Promise<BootedServer | { skipped: string }> {
+  const proc = Bun.spawn(serverCommand(target.server), {
+    cwd: REPO_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: serverEnvironment(target, withDb, scenario?.id),
+  })
+
+  // A scenario-specific server may expose only its validated POST route.
+  const url = `http://127.0.0.1:${PORT}${scenario?.path ?? '/bench/json'}`
+  const request: RequestInit | undefined = scenario
+    ? {
+        method: scenario.method,
+        headers: headersFor(target, scenario),
+        ...(scenario.body != null ? { body: scenario.body } : {}),
+      }
+    : undefined
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let ready = false
+  try {
+    while (!controller.signal.aborted) {
+      if (proc.exitCode != null) {
+        const err = await new Response(proc.stderr).text()
+        // 78 is EX_CONFIG: the server said "I am not installed here".
+        if (proc.exitCode === 78 || target.optional)
+          return { skipped: err.trim().split('\n').pop() || `exited ${proc.exitCode}` }
+        throw new Error(`${target.id} server exited ${proc.exitCode}:\n${err}`)
+      }
+      try {
+        const res = await fetch(url, { ...request, signal: controller.signal })
+        if (res.ok) {
+          await res.arrayBuffer()
+          if (!controller.signal.aborted) {
+            ready = true
+            return { proc, pid: proc.pid }
+          }
+        }
+        else {
+          await res.body?.cancel()
+        }
+      }
+      catch { /* not listening yet, or the startup deadline expired */ }
+      if (!controller.signal.aborted) await Bun.sleep(100)
+    }
+    throw new Error(`${target.id} server did not become ready within ${timeoutMs / 1000}s`)
+  }
+  finally {
+    clearTimeout(timer)
+    controller.abort()
+    if (!ready) {
+      // A failed benchmark server must not survive to occupy the port or
+      // consume CPU/RSS during the next target's measurements.
+      if (proc.exitCode == null) proc.kill('SIGKILL')
+      await proc.exited
+    }
+  }
+}
+
+export async function stop(server: BootedServer): Promise<void> {
+  server.proc.kill()
+  await server.proc.exited
+}
+
+export function headersFor(target: Target, scenario: Scenario): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (scenario.body != null) headers['content-type'] = 'application/json'
+
+  // Unsafe methods always carry the double-submit pair. The cold-client
+  // profile is about what a first-time GET costs; it is not a claim that a
+  // client can mutate state without a token, and pretending otherwise would
+  // measure a 403 instead of a route.
+  const unsafe = scenario.method !== 'GET'
+  if (target.cookie || unsafe) headers.cookie = CSRF_COOKIE
+  if (unsafe) headers['x-csrf-token'] = CSRF_TOKEN
+
+  return headers
+}
+
+/** Keep setup-only validation evidence stable without changing measured traffic. */
+export function probeHeadersFor(target: Target, scenario: Scenario): Record<string, string> {
+  return {
+    ...headersFor(target, scenario),
+    // Stacks includes its request ID in JSON error envelopes. A fresh ID would
+    // make the exact body digest differ before and after load even when the
+    // validation contract is unchanged. Send the same header to every peer,
+    // and only on untimed probes, so no target receives measured work relief.
+    'x-request-id': 'benchmark-parity-probe',
+  }
+}
+
+/** Require identical status, JSON media type, and body bytes before measuring. */
+export async function assertResponseParity(target: Target, scenario: Scenario, res: Response): Promise<ResponseParityEvidence> {
+  const body = await res.text()
+  if (res.status !== 200)
+    throw new Error(`${target.id} answered ${res.status} for ${scenario.id}, expected 200: ${body.slice(0, 200)}`)
+  if (body !== scenario.expect)
+    throw new Error(`${target.id} answered ${body.slice(0, 200)} for ${scenario.id}, expected ${scenario.expect}`)
+  const mediaType = res.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json')
+    throw new Error(`${target.id} answered ${scenario.id} with ${mediaType ?? 'no content type'}, expected application/json`)
+  return responseParityEvidence(res.status, mediaType, body)
+}
+
+export async function assertProbeResponse(target: Target, scenario: Scenario, probe: ScenarioProbe, res: Response): Promise<ResponseParityEvidence> {
+  const probeId = `${scenario.id}/${probe.id}`
+  if (probe.expected.kind === 'client-error') {
+    const body = await res.text()
+    if (res.status < 400 || res.status >= 500)
+      throw new Error(`${target.id} answered ${res.status} for ${probeId}, expected a client error`)
+    const mediaType = res.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? null
+    if (mediaType !== 'application/json')
+      throw new Error(`${target.id} answered ${probeId} with ${mediaType ?? 'no content type'}, expected application/json`)
+    try {
+      const parsed = JSON.parse(body)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw new TypeError('not an object')
+    }
+    catch {
+      throw new Error(`${target.id} answered ${probeId} without a JSON error object, expected a JSON error body`)
+    }
+    return responseParityEvidence(res.status, mediaType, body)
+  }
+
+  return assertResponseParity(target, { ...scenario, id: probeId, expect: probe.expected.body }, res)
+}
+
+/** Probe the live target before measuring it. */
+export async function assertParity(target: Target, scenario: Scenario): Promise<ScenarioParityEvidence> {
+  const requiresQueryLog = benchmarkQueryLoggingEnabled() && target.server === 'stacks.ts' && scenario.requiresDb
+  if (requiresQueryLog)
+    resetFixtureLogs(FIXTURE)
+
+  const res = await fetch(`http://127.0.0.1:${PORT}${scenario.path}`, {
+    method: scenario.method,
+    headers: headersFor(target, scenario),
+    ...(scenario.body != null ? { body: scenario.body } : {}),
+  })
+  const primary = await assertResponseParity(target, scenario, res)
+  const probes: ScenarioParityEvidence['probes'] = []
+  for (const probe of scenario.probes ?? []) {
+    const probeScenario = { ...scenario, body: probe.body }
+    const probeResponse = await fetch(`http://127.0.0.1:${PORT}${scenario.path}`, {
+      method: scenario.method,
+      headers: probeHeadersFor(target, probeScenario),
+      body: probe.body,
+    })
+    probes.push({ id: probe.id, response: await assertProbeResponse(target, scenario, probe, probeResponse) })
+  }
+  if (requiresQueryLog)
+    await assertFixtureQueryLogged(FIXTURE)
+  return { primary, probes }
+}
+
+/** Require a target's complete response contract to remain exact after load. */
+export function assertStableParity(target: Target, scenario: Scenario, before: ScenarioParityEvidence, after: ScenarioParityEvidence): void {
+  if (JSON.stringify(before) !== JSON.stringify(after))
+    throw new Error(`${target.id} changed response evidence under load for ${scenario.id}`)
+}

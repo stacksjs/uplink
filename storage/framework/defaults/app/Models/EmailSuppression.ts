@@ -1,0 +1,60 @@
+import { defineModel } from '@stacksjs/orm'
+import { schema } from '@stacksjs/validation'
+
+export default defineModel({
+  name: 'EmailSuppression',
+  table: 'email_suppressions',
+  primaryKey: 'id',
+  autoIncrement: true,
+
+  indexes: [
+    {
+      name: 'email_suppressions_email_type_unique',
+      columns: ['email', 'type'],
+      unique: true,
+    },
+  ],
+
+  // An infrastructure table: rows are written by the system, not on behalf of a
+  // caller, so no row has a per-caller owner to scope by. Writes are gated by
+  // `middleware` instead. Declared rather than left silent (stacksjs/stacks#2375).
+  ownership: false,
+
+  traits: {
+    useTimestamps: true,
+    useApi: {
+      uri: 'email-suppressions',
+      routes: ['index', 'show', 'destroy'],
+      // Reads stay as they were; writes need an admin.
+      // a suppression entry is a compliance record - deleting one re-enables mail to someone who bounced or opted out,
+      // so `auth` alone let any signed-in caller do it (stacksjs/stacks#2412).
+      middleware: { read: ['auth'], write: ['auth', 'role:admin'] },
+    },
+  },
+
+  attributes: {
+    email: {
+      required: true,
+      fillable: true,
+      validation: {
+        rule: schema.string().email().required().max(320),
+      },
+    },
+    type: {
+      required: true,
+      fillable: true,
+      validation: {
+        rule: schema.enum(['bounce', 'complaint', 'unsubscribe', 'manual']),
+      },
+    },
+    reason: {
+      required: false,
+      fillable: true,
+      validation: {
+        rule: schema.string().max(2000),
+      },
+    },
+  },
+
+  dashboard: { enabled: false },
+} as const)

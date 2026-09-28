@@ -1,0 +1,355 @@
+/**
+ * Load-generator adapters.
+ *
+ * `oha` is the driver whose numbers are fit to publish: it is native, reports
+ * percentiles, and exposes exact status-code counts for the measured load.
+ * `bombardier`, `autocannon`, and `builtin` remain direction-only because they
+ * cannot prove that every response kept the scenario's exact HTTP 200 status.
+ * `builtin` is a Bun implementation
+ * that ships with this harness so the suite runs on a clean checkout with
+ * nothing installed. Both are fine for "did that change help", and their
+ * output is labelled `direction-only` everywhere it appears, because a
+ * JavaScript generator can become the limit before the server does.
+ *
+ * Every adapter returns the same shape, so the runner and the report never
+ * learn which tool produced a row.
+ */
+
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+
+export interface LoadRequest {
+  url: string
+  method: 'GET' | 'POST'
+  body?: string
+  headers: Record<string, string>
+  connections: number
+  /** Discarded, not measured. */
+  warmupSeconds: number
+  durationSeconds: number
+  /** One global fixed request rate across all connections. */
+  requestRate?: number
+}
+
+/**
+ * Latency percentiles, where a percentile the tool did not report is `null`.
+ *
+ * Never `0`. A tool that omits `p99` is saying it has no evidence, and zero is
+ * the best possible latency - so coercing one to the other turns missing
+ * evidence into a perfect result, which then passes every downstream check.
+ */
+export interface LatencyPercentiles {
+  p50: number | null
+  p90: number | null
+  p99: number | null
+}
+
+export interface LoadResult {
+  /** Requests per second over the measured window. */
+  rpsMean: number
+  /** Median of the per-second request counts. `null` when the tool omits it. */
+  rpsP50: number | null
+  latencyMs: LatencyPercentiles
+  requests: number
+  errors: number
+  /** Raw stdout from the tool, committed alongside the report. */
+  raw: string
+}
+
+export interface Driver {
+  name: string
+  version: () => Promise<string | null>
+  /** Whether numbers from this driver may be published. */
+  publishable: boolean
+  supportsFixedRate: boolean
+  /** Counts include in-flight requests completed after the load deadline. */
+  drainsRequests?: boolean
+  isAvailable: () => Promise<boolean>
+  run: (req: LoadRequest) => Promise<LoadResult>
+}
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    throw new Error(`oha output has invalid ${label}`)
+  return value as Record<string, unknown>
+}
+
+function finite(value: unknown, label: string, nullable = false): number | null {
+  if (nullable && value == null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+    throw new Error(`oha output has invalid ${label}`)
+  return value
+}
+
+function count(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0)
+    throw new Error(`oha output has invalid ${label}`)
+  return value as number
+}
+
+export function parseOhaOutput(raw: string): LoadResult {
+  const json = record(JSON.parse(raw), 'root object')
+  const summary = record(json.summary, 'summary')
+  const rpsMean = finite(summary.requestsPerSec, 'requests per second')!
+  const rps = json.rps == null ? null : record(json.rps, 'RPS summary')
+  const rpsPercentiles = rps?.percentiles == null ? null : record(rps.percentiles, 'RPS percentiles')
+  const latency = json.latencyPercentiles == null ? null : record(json.latencyPercentiles, 'latency percentiles')
+  const codes = json.statusCodeDistribution == null ? {} : record(json.statusCodeDistribution, 'status distribution')
+  const transport = json.errorDistribution == null ? {} : record(json.errorDistribution, 'error distribution')
+
+  let ok = 0
+  let bad = 0
+  for (const [code, value] of Object.entries(codes)) {
+    if (!/^\d{3}$/.test(code))
+      throw new Error(`oha output has invalid HTTP status ${code}`)
+    const requests = count(value, `HTTP ${code} count`)
+    if (Number(code) === 200) ok += requests
+    else bad += requests
+  }
+  const transportErrors = Object.entries(transport)
+    .reduce((sum, [name, value]) => sum + count(value, `${name} error count`), 0)
+
+  return {
+    rpsMean,
+    rpsP50: finite(rpsPercentiles?.p50, 'p50 requests per second', true),
+    latencyMs: {
+      p50: finite(latency?.p50, 'p50 latency', true) == null ? null : finite(latency?.p50, 'p50 latency')! * 1000,
+      p90: finite(latency?.p90, 'p90 latency', true) == null ? null : finite(latency?.p90, 'p90 latency')! * 1000,
+      p99: finite(latency?.p99, 'p99 latency', true) == null ? null : finite(latency?.p99, 'p99 latency')! * 1000,
+    },
+    requests: ok + bad + transportErrors,
+    errors: bad + transportErrors,
+    raw,
+  }
+}
+
+export function ohaArgs(req: LoadRequest, durationSeconds: number): string[] {
+  return [
+    'oha',
+    '-z',
+    `${durationSeconds}s`,
+    '-c',
+    String(req.connections),
+    ...(req.requestRate == null ? [] : ['-q', String(req.requestRate), '--latency-correction']),
+    '--wait-ongoing-requests-after-deadline',
+    '--no-tui',
+    '--output-format',
+    'json',
+    ...methodArgs(req, '-m', '-d', '-H'),
+    req.url,
+  ]
+}
+
+async function which(bin: string): Promise<boolean> {
+  const proc = Bun.spawn(['sh', '-c', `command -v ${bin}`], { stdout: 'ignore', stderr: 'ignore' })
+  return (await proc.exited) === 0
+}
+
+async function capture(cmd: string[], env?: Record<string, string>): Promise<string> {
+  const proc = Bun.spawn(cmd, {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, ...env } as Record<string, string>,
+  })
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  if (code !== 0)
+    throw new Error(`${cmd[0]} exited ${code}: ${err.trim() || out.trim()}`)
+  return out
+}
+
+async function commandVersion(command: string): Promise<string | null> {
+  try {
+    return (await capture([command, '--version'])).trim().split('\n')[0] || null
+  }
+  catch {
+    return null
+  }
+}
+
+function methodArgs(req: LoadRequest, methodFlag: string, bodyFlag: string, headerFlag: string): string[] {
+  const args: string[] = []
+  if (req.method !== 'GET') {
+    args.push(methodFlag, req.method)
+    if (req.body != null) args.push(bodyFlag, req.body)
+  }
+  for (const [name, value] of Object.entries(req.headers))
+    args.push(headerFlag, `${name}: ${value}`)
+  return args
+}
+
+/*
+ * Unit converters that preserve absence.
+ *
+ * Each returns `null` for anything that is not a finite number, so a tool that
+ * omits a percentile, reports it as null, or emits a string is recorded as
+ * "not measured" rather than as zero latency or as NaN.
+ */
+const millis = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null
+const micros = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value / 1000 : null
+
+/** `oha` — the preferred tool. Percentiles come straight out of its JSON. */
+const oha: Driver = {
+  name: 'oha',
+  version: () => commandVersion('oha'),
+  drainsRequests: true,
+  publishable: true,
+  supportsFixedRate: true,
+  isAvailable: () => which('oha'),
+  async run(req) {
+    // oha has no warm-up flag, so the warm-up is a separate throwaway run.
+    if (req.warmupSeconds > 0) {
+      await capture(ohaArgs(req, req.warmupSeconds))
+    }
+    const raw = await capture(ohaArgs(req, req.durationSeconds))
+    return parseOhaOutput(raw)
+  },
+}
+
+/** `bombardier` — latencies in microseconds. */
+const bombardier: Driver = {
+  name: 'bombardier',
+  version: () => commandVersion('bombardier'),
+  publishable: false,
+  supportsFixedRate: false,
+  isAvailable: () => which('bombardier'),
+  async run(req) {
+    if (req.warmupSeconds > 0)
+      await capture(['bombardier', '-d', `${req.warmupSeconds}s`, '-c', String(req.connections), '-o', 'json', ...methodArgs(req, '-m', '-b', '-H'), req.url])
+    const raw = await capture(['bombardier', '-d', `${req.durationSeconds}s`, '-c', String(req.connections), '-o', 'json', '-l', ...methodArgs(req, '-m', '-b', '-H'), req.url])
+    const json = JSON.parse(raw)
+    const r = json.result
+    const ok = (r.req2xx ?? 0) + (r.req3xx ?? 0)
+    const bad = (r.req1xx ?? 0) + (r.req4xx ?? 0) + (r.req5xx ?? 0) + (r.others ?? 0)
+    const pct = r.latency?.percentiles ?? {}
+    return {
+      rpsMean: r.rps?.mean ?? 0,
+      rpsP50: r.rps?.percentiles?.['50'] ?? null,
+      latencyMs: {
+        p50: micros(pct['50']),
+        p90: micros(pct['90']),
+        p99: micros(pct['99']),
+      },
+      requests: ok + bad,
+      errors: bad,
+      raw,
+    }
+  },
+}
+
+/** `autocannon` — the JS-native fallback. Latencies already in ms. */
+const autocannon: Driver = {
+  name: 'autocannon',
+  version: () => commandVersion('autocannon'),
+  publishable: false,
+  supportsFixedRate: false,
+  isAvailable: () => which('autocannon'),
+  async run(req) {
+    const args = ['autocannon', '-c', String(req.connections), '-j', ...methodArgs(req, '-m', '-b', '-H')]
+    // The target URL is explicit. Autocannon treats PORT as a URL base, so an
+    // inherited application setting must not alter or invalidate that URL.
+    const env = { PORT: '' }
+    // Keep warmup separate, as in the native adapters. Autocannon's -w
+    // selects worker threads, not a discarded warmup duration.
+    if (req.warmupSeconds > 0)
+      await capture([...args, '-d', String(req.warmupSeconds), req.url], env)
+    const raw = await capture([...args, '-d', String(req.durationSeconds), req.url], env)
+    const json = JSON.parse(raw)
+    return {
+      rpsMean: json.requests?.average ?? 0,
+      rpsP50: json.requests?.p50 ?? null,
+      latencyMs: {
+        p50: millis(json.latency?.p50),
+        p90: millis(json.latency?.p90),
+        p99: millis(json.latency?.p99),
+      },
+      // Autocannon's total counts HTTP responses only. Its errors already
+      // include timeouts, so add that count once to include failed attempts.
+      requests: (json.requests?.total ?? 0) + (json.errors ?? 0),
+      errors: (json.errors ?? 0) + (json.non2xx ?? 0),
+      raw,
+    }
+  },
+}
+
+const WORKER = fileURLToPath(new URL('./load-worker.ts', import.meta.url))
+
+/**
+ * The zero-install fallback: N Bun subprocesses, each driving a share of the
+ * connections. Split across processes rather than run in one, because a single
+ * Bun process is one thread and would cap the generator well below the server.
+ * Still the weakest of the four — see the note at the top of this file.
+ */
+const builtin: Driver = {
+  name: 'builtin',
+  version: async () => `Bun ${Bun.version}`,
+  drainsRequests: true,
+  publishable: false,
+  supportsFixedRate: false,
+  isAvailable: async () => true,
+  async run(req) {
+    const workers = Math.max(1, Math.min(req.connections, Math.max(1, (navigator.hardwareConcurrency || 4) - 2)))
+    const per = Math.max(1, Math.floor(req.connections / workers))
+
+    const results = await Promise.all(
+      Array.from({ length: workers }, (_, i) => {
+        const spec = JSON.stringify({
+          url: req.url,
+          method: req.method,
+          body: req.body ?? null,
+          headers: req.headers,
+          connections: i === workers - 1 ? req.connections - per * (workers - 1) : per,
+          warmupMs: req.warmupSeconds * 1000,
+          durationMs: req.durationSeconds * 1000,
+        })
+        return capture([process.execPath, WORKER, spec]).then(text => JSON.parse(text.trim().split('\n').pop()!))
+      }),
+    )
+
+    const latencies: number[] = results.flatMap(r => r.samples as number[])
+    latencies.sort((a, b) => a - b)
+    const pick = (q: number) => latencies.length === 0 ? null : latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * q))]!
+
+    const seconds = Math.max(...results.map(r => (r.perSecond as number[]).length))
+    const perSecond = Array.from({ length: seconds }, (_, i) =>
+      results.reduce((sum, r) => sum + ((r.perSecond as number[])[i] ?? 0), 0))
+    // Drop the trailing partial second — it always reads as a throughput
+    // collapse and drags the median down for no reason.
+    const whole = perSecond.slice(0, -1)
+    const sorted = [...whole].sort((a, b) => a - b)
+
+    const requests = results.reduce((sum, r) => sum + (r.requests as number), 0)
+    const errors = results.reduce((sum, r) => sum + (r.errors as number), 0)
+
+    return {
+      rpsMean: requests / req.durationSeconds,
+      rpsP50: sorted.length ? sorted[Math.floor(sorted.length / 2)]! : null,
+      latencyMs: { p50: pick(0.5), p90: pick(0.9), p99: pick(0.99) },
+      requests,
+      errors,
+      raw: JSON.stringify({ workers, perSecond, requests, errors }, null, 2),
+    }
+  },
+}
+
+export const DRIVERS: readonly Driver[] = [oha, bombardier, autocannon, builtin]
+
+/** First available driver, preferring the publication-capable native driver. */
+export async function pickDriver(preferred?: string): Promise<Driver> {
+  if (preferred) {
+    const named = DRIVERS.find(d => d.name === preferred)
+    if (!named)
+      throw new Error(`Unknown load driver '${preferred}'. Known: ${DRIVERS.map(d => d.name).join(', ')}`)
+    if (!(await named.isAvailable()))
+      throw new Error(`Load driver '${preferred}' is not installed`)
+    return named
+  }
+  for (const driver of DRIVERS) {
+    if (await driver.isAvailable())
+      return driver
+  }
+  throw new Error('No load driver available')
+}

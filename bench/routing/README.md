@@ -1,0 +1,510 @@
+# Routing benchmark
+
+What it costs Stacks to answer a request, next to Elysia, Hono, and the ceiling
+of the runtime all three sit on.
+
+```bash
+bun bench/routing/run.ts
+```
+
+That runs every scenario against the default targets the machine can boot and writes a
+timestamped directory under `results/` containing `report.md`,
+`measurements.json`, and the raw load-generator output for every individual run.
+The JSON artifact embeds the selected target definitions and complete scenario
+contracts, including request bodies, expected responses, headers profiles, and
+validation probes. It also retains every repeat with its CPU sample source and
+artifact-relative raw output paths. `verify-artifact.ts` checks those paths,
+file types and byte counts and regenerates the report from the JSON before a
+hosted workflow uploads the completed directory.
+
+Reports and metadata record the Git revision and working-tree state both before
+and after measurement, plus the machine architecture. Ignored files are
+excluded from that state; source archives without Git are marked unavailable.
+A revision or cleanliness change during measurement invalidates publication.
+Reports also record the versions resolved for every selected peer framework in
+that same isolated server context, so a copied result remains tied to the code
+that actually ran.
+
+## Why the harness looks like this
+
+A throughput number is easy to produce and easy to produce dishonestly by
+accident. The safeguards here exist only to stop that:
+
+- **Response parity is asserted before and after every measurement.** Every target has
+  to answer every scenario with status 200, an application/json media type, and
+  byte-identical bodies (`scenarios.ts` holds the expected string). A server that
+  is fast because it returns a different result is not a faster server, and this
+  checks are what catch it, including behavior that drifts after sustained load.
+- **Validation is probed, not assumed.** Before `post-validate` is measured,
+  every target must reject missing fields, wrong field types, and non-object
+  JSON bodies with a client error whose media type is `application/json` and
+  whose body is a JSON object, then accept an extra input field without echoing
+  it. These setup-only probes keep a no-op, permissive, throwing, or non-JSON
+  handler out of the comparison.
+- **Parity evidence is retained.** `measurements.json` records the exact status,
+  media type, body byte count, and SHA-256 body digest before and after each
+  timed run for the primary request and every validation probe. A target whose
+  fingerprint changes under load aborts the run.
+- **Stacks runs the real framework source.** A subprocess using the same Bun
+  executable, working directory, and isolated config as every benchmark server
+  resolves each public `@stacksjs/*` package entry point. The runner requires
+  every result to live under that package's `storage/framework/core/*/src` tree
+  and records every resolved path. It also records the exact version and entry
+  path of the published `@stacksjs/bun-router` runtime that supplies native
+  dispatch. The Stacks fixture may configure and call public APIs, but may not
+  import framework internals or reimplement a data path with
+  `bun:sqlite`. Tests also reject benchmark selectors in framework source and
+  prevent the fixture from bypassing the router with direct Bun serving,
+  prebuilt responses, or manual JSON serialization.
+- **No application configuration reaches a server.** The runner boots through
+  this repository's bunfig, which preloads `.env`, and only the Stacks targets
+  read any of it: a stray `STACKS_CSP` would add a response header to one
+  framework and to no other, and two people on the same commit would measure
+  different things. A server inherits only what a process needs to start -
+  `PATH`, `HOME`, locale, temp directories - and the benchmark states
+  everything else explicitly. Every child also uses `--no-env-file`, so Bun
+  cannot repopulate filtered settings from the repository after it starts.
+  `DB_QUERY_LOGGING_ENABLED` is forwarded because the report describes it.
+- **Every process exposes only benchmark routes.** The Stacks fixture uses the
+  framework's public programmatic-router configuration to disable application
+  route discovery, and its public API-server configuration to disable view
+  discovery. Without both, this repository's `routes/` modules and application
+  views would load during `serve()` even though every peer process contains
+  only the selected scenario. The fixture does not touch bun-router internals
+  or point discovery at a benchmark-owned empty directory.
+- **Warm-up is discarded, not measured.** 5 seconds by default, then 30 measured.
+- **Busy hosts are rejected around every measurement.** One competing process,
+  or combined competing work, using at least 75% of one core before a server
+  starts or after it stops aborts
+  the run. `--allow-busy-host` is an explicit direction-only override, recorded
+  in the report. What each process is using is measured the same way the CPU
+  column is - two readings of cumulative CPU time a few hundred milliseconds
+  apart - because `ps -o %cpu` is an average over a process's whole lifetime,
+  which cannot see a long-idle neighbour that has just started saturating a
+  core, and keeps reporting a burst that finished an hour ago. Linux reads
+  `/proc/<pid>/stat` for both the server window and host guard, converts its
+  ticks with the host's cached `getconf CLK_TCK` value, and records that rate
+  in the report. Other hosts, and Linux environments where either source is
+  unavailable, fall back to cumulative `ps` time. A Linux run without the
+  resolved clock rate remains direction-only because its CPU conversion cannot
+  be audited precisely enough for publication.
+- **Three runs, median reported, spread printed beside it.** A single run on a
+  laptop is a mood, not a measurement. If the `spread` column is wide, the
+  median is not telling you much. A full range above 10% of the median marks
+  that scenario unstable and invalid for comparison.
+- **Every measurement gets a fresh server process.** Target order follows a
+  balanced triplet plus complementary pairs, so every target's cumulative
+  position is equal, or differs by the mathematically unavoidable single
+  position for an odd number of runs over an even-sized matrix. Route warm state
+  and a warming or throttling host therefore cannot consistently favor one
+  implementation.
+- **Comparisons are paired within each scheduled run.** When Bun raw is selected,
+  the `Bun raw` column reports the median target-to-raw ratio and its range.
+  This exposes host drift that separate target medians can conceal.
+- **CPU is reported per row.** Deltas of the server's cumulative CPU time over
+  the wall clock of the measured load invocation, after warm-up has finished.
+  This includes load-tool startup and shutdown overhead. A win bought by burning more CPU is visible here
+  rather than hidden inside "req/s".
+
+## Cost per request
+
+A saturating run answers "how fast can this box go". `--rate` answers the
+different question the optimization work actually asks: **does this change make
+the framework do less work per request?**
+
+```bash
+bun bench/routing/run.ts --rate 20000
+```
+
+Every target is held to the same fixed request rate, so every one of them does
+the same externally visible work, and the server's own CPU time divided by the
+requests it served is a direct measure of cost. The report leads with **CPU
+us/req**, lower being cheaper.
+
+This mode exists because saturating throughput is dominated by the host. On an
+ordinary developer laptop, repeated saturating runs of unchanged code vary by
+10-15%, which the stability limit correctly rejects - leaving no usable signal
+at all. Cost per request on the same machine repeats within a few percent,
+because a competing process lengthens the wall clock without adding to the
+server's own CPU accounting. That is tight enough to see a change worth half a
+microsecond.
+
+Two things keep it honest:
+
+- **The rate has to be attained.** A target that could not keep up served fewer
+  requests over the same CPU window and would otherwise appear as the cheapest
+  row in the table. Anything below 98% of the requested rate is marked invalid
+  in the report and blocks publication, naming the row.
+- **Stability is measured on the cost, not the throughput.** A fixed rate pins
+  throughput, so its spread reads near zero whether the run was steady or not.
+  The 10% limit applies to the per-request cost range instead.
+
+The Bun raw column is omitted here: it is a ratio of throughputs, and at a fixed
+rate every row delivers the same throughput by construction.
+
+The CPU window includes the load generator's startup and drain, identically for
+every target, so read the rows against each other rather than as an absolute
+per-request cost. Fixed-rate runs need a generator that can pace requests, which
+today means `oha`; the runner refuses rather than silently saturating.
+
+Publication needs everything the saturating matrix needs - dedicated hardware,
+a clean revision, the full target and scenario set, the same windows and
+repeats - plus rate attainment on every row.
+
+## Load generators
+
+| Driver | Publishable | Notes |
+|---|---|---|
+| `oha` | yes | Preferred. `brew install oha` or `cargo install oha`. |
+| `bombardier` | **no** | Native direction-only fallback. It reports status classes, not exact codes. |
+| `autocannon` | **no** | JS fallback for direction-only comparisons. |
+| `builtin` | **no** | Ships with the harness so a clean checkout can run. |
+
+The runner picks the first available in that order, or takes `--driver <name>`.
+
+The JavaScript drivers can become the limit before the server does. The built-in
+driver is Bun subprocesses driving `fetch`, so it also competes with the server
+under test for the same cores and runtime. They are genuinely useful for "did
+that change help", which is what they are kept for. Every report they produce
+is stamped `direction-only`, and numbers from them must not leave this
+directory. Install `oha` before producing anything anyone else will read.
+
+## The machine matters
+
+For request-path CPU investigation, run `bun bench/routing/profile.ts`. This
+captures the existing cold/warm Stacks clients across all four scenarios with
+stock protections enabled. Each fresh HTTP server receives five seconds of
+warm-up before sampling around a ten-second oha load through `bun:jsc.profile()`.
+The generator runs in a separate process. Its startup, draining, and result
+parsing are inside the capture window. Server startup, warm-up, artifact writes,
+and post-load parity checks are outside the capture window.
+
+The output retains source/runtime provenance, raw stack samples, function and
+bytecode summaries, load output, parity evidence, and worker logs. Sampling
+changes execution cost, so these artifacts are never publishable throughput
+comparisons. The same busy-host guard applies, with no profiling override.
+Use `--output <directory>` to select the artifact directory.
+
+The [Routing diagnostic workflow](https://github.com/stacksjs/stacks/actions/workflows/routing-benchmark.yml)
+can be dispatched manually to run the full default matrix on Ubuntu with pinned,
+checksummed oha, five seconds of warm-up, thirty measured seconds and three repeats.
+Its `cost` mode runs the same matrix at a fixed rate and reports CPU per request
+instead, which is what a shared runner can actually answer.
+The `targets` and `runs` inputs allow a diagnostic to spend more repetitions on a
+smaller comparison set while preserving the three-repeat default matrix.
+It uploads the report, metadata and raw samples as a `routing-diagnostic` artifact.
+The hosted runner is shared, so the workflow explicitly sets `BENCH_DEDICATED=0`.
+Use these artifacts for investigation, not published rankings. Source resolution,
+parity, busy-host and stability checks still apply.
+Select its `profile` mode to capture stock HTTP CPU profiles instead; the default
+`benchmark` mode retains the full throughput matrix and measurement windows.
+
+## Machine-level diagnostics
+
+`bench/routing/perf.ts` is Linux-only and answers what the rest of this
+directory cannot see.
+
+```bash
+bun bench/routing/perf.ts --targets stacks-minimal,elysia,bun-raw --scenario path-param --rate 8000
+```
+
+Two things come out of it. `perf stat`'s `task-clock` is the same CPU time `ps`
+reports, read from the kernel in nanoseconds instead of hundredths of a second
+- at 8,000 req/s over 20 seconds that is three orders of magnitude more
+resolution than the throughput runner has, which matters because three separate
+attempts to explain the last half-microsecond of Stacks' cost ran into that
+floor (stacksjs/stacks#2597). And `perf record` says where the time goes:
+kernel, Bun's own native code, or JIT-compiled JavaScript.
+
+Bun emits no jitdump, so JIT frames stay anonymous. That is itself the
+measurement - the share of samples landing in anonymous executable memory
+against the runtime's own symbols is exactly what a JavaScript-level profiler
+cannot tell you.
+
+Counters and samples are collected over separate load windows, because
+`perf record` perturbs what it samples and folding it into the counted window
+would report a cost that includes the profiler. Hardware counters are attempted
+separately from software ones: a hosted runner is a VM and usually exposes no
+PMU, and that absence is recorded rather than fatal. Parity is checked before
+and after, as everywhere else here, and these artifacts are never a ranking.
+
+The [Routing diagnostic workflow](https://github.com/stacksjs/stacks/actions/workflows/routing-benchmark.yml)
+runs it in `machine` mode, which installs `linux-tools-generic` and lowers
+`perf_event_paranoid` so the versioned binaries can attach. Its
+`machine-symbols` mode runs the same thing under Bun's profile build, because
+the released binary is stripped and its own frames otherwise profile as bare
+addresses. That build is slower than the release one, so use it to name
+functions rather than to size them - the servers inherit whichever binary runs
+the runner, through `process.execPath`.
+
+What the first run of this found, for the record: at 8,000 req/s on
+`path-param`, the kernel is 57% of the CPU a request costs and is identical
+across Stacks, Elysia and the `Bun.serve` baseline to within 0.03us. The
+difference between frameworks lives entirely in the remaining 43% - for
+`stacks-minimal` against Elysia, +0.46us in Bun's own native code and +0.21us
+in JIT-compiled JavaScript. That is why three rounds of substituting individual
+JavaScript operations moved nothing measurable: the operations were never the
+larger half of the problem.
+
+Anything published needs a documented machine and load tool: CPU model, core
+count, OS, Bun version, exact generator version, and load topology. The report
+records all of them automatically. A laptop throttles and a shared cloud VM has
+neighbours; neither produces a number worth quoting.
+
+This runner launches the generator on the same host as the target and labels
+that topology in every report. Rotated target order keeps the comparison
+symmetric, but generator and server still share CPU caches and memory
+bandwidth, so absolute throughput may be understated. A separate generator
+host is preferable for a saturation study, but requires external orchestration
+and must not be presented as output from this single-host runner.
+
+Set `BENCH_DEDICATED=1` only on that dedicated server. The runner additionally
+requires a clean identified revision, the configured Bun runtime, at least 5
+seconds of warm-up, 30 measured seconds, three repeats, and no observed busy
+process. Publication also requires every default target and every declared
+scenario, preventing a minimal-only profile or easy-scenario subset from being
+presented as the benchmark. Explicit tuned targets may be added, but cannot
+replace the stock matrix. Reports list every unmet publication prerequisite.
+
+Publication additionally requires every selected target and scenario to finish
+all repeats, return valid measurements without request errors, include a server
+CPU reading, retain a complete and stable parity fingerprint for every repeat,
+and stay within the 10% throughput stability range.
+
+Every repeat is validated individually, not just the aggregate row. A median
+can hide one invalid latency, and a repeat that served no requests used to
+contribute a zero error rate to the mean. Each repeat is retained with the CPU
+reading taken during it and its run ordinal, so an issue names the run whose
+raw output should be read.
+
+Missing evidence stays missing. A latency percentile the load tool did not
+report is `null` rather than `0`, and the report renders it as `-`. An
+aggregate is `null` unless every repeat measured it. `measurements.json`
+carries `schemaVersion: 4` to mark these rules: `errorRate` is pooled errors
+over pooled requests rather than the mean of per-repeat rates, `cpuPercent`
+requires every repeat to have reported one, and `runs` counts the repeats
+retained rather than the number requested. Fixed-rate runs retain the median
+and range of run-paired CPU-cost ratios against Bun raw. The schema also keeps
+each repeat's run ordinal, request and error counts, latency, CPU cost and
+sample source, rate attainment, and measured and warm-up output filenames.
+
+Use the Bun version requested by `package.json`'s `engines.bun` for the baseline.
+The runner records that requirement beside the actual runtime version and warns
+when they differ. Alternate runtimes are allowed for explicit runtime comparisons:
+invoke the desired Bun binary directly, for example `/path/to/bun bench/routing/run.ts`.
+The benchmark servers use the same executable as the runner.
+
+Every server here is a single Bun listener with no `reusePort` clustering, so
+the comparison is per-core across the board. A multi-core run is a separate,
+clearly-labelled exercise.
+
+## Scenarios
+
+| id | What it measures |
+|---|---|
+| `static-json` | The floor: one static JSON literal, no params, no middleware, no DB. Bun raw uses a native static response. |
+| `path-param` | One path param, echoed. |
+| `post-validate` | A JSON body through each framework's schema validation. |
+| `db-roundtrip` | A SQLite read, through each framework's idiomatic data path. |
+
+`db-roundtrip` builds its own fixture in `.tmp/bench.sqlite` and never touches
+`database/stacks.sqlite`. Stacks reads it through its own query builder (the
+runner points `DB_DATABASE_PATH` at the fixture); the others open it with
+`bun:sqlite` directly, because none of them ships an ORM and that is their
+idiomatic path. That asymmetry favours them, and it is stated here rather than
+papered over. Every target prepares the same selected columns and bound
+`id = ?` predicate once at startup, then binds `1` for each request. The Stacks
+route builds that invariant query through its public typed query builder, then
+uses the SQLite-only `executeTakeFirstSync()` terminal because Bun SQLite performs
+the read synchronously either way. This avoids both a one-row array and Promise
+scheduling that the other targets do not have. `post-validate` has the same shape: Elysia uses its `t` schema,
+Hono a hand-written check behind its own `validator()` seam, and both are
+cheaper than a compiled rule set.
+
+The Bun raw ceiling uses `Bun.serve`'s native route table, matching the native
+dispatch used by Stacks in production. Its static scenario is a prebuilt
+`Response`; dynamic routes construct only the response their payload requires.
+Keeping synchronous routes out of an `async fetch` wrapper avoids charging the
+runtime baseline for Promise scheduling it does not need.
+
+The fixture includes `query_logs` and its indexes, but persistent query history
+is disabled by default in production. This keeps the stock database scenario
+focused on the request and read path shared by every target. It also lets the
+query builder use its direct no-hooks execution path. Development keeps
+request-scoped query tracking for Stacks error diagnostics.
+
+Set `DB_QUERY_LOGGING_ENABLED=true` to include durable query history in the
+workload. The bare SQLite targets do not provide an equivalent logger, so treat
+that run as an observability-cost profile rather than a like-for-like database
+comparison. Accumulated logs are cleared before each repetition, outside
+warm-up and measurement, while the seeded read data stays unchanged.
+
+A former process-wide recursion guard could also skip legitimate queries while a
+log write was pending. Logging now suppresses only queries descended from its
+own write, with warm sequential and concurrent persistence checks. Database
+results from before that correction should be rerun because they may include
+less logging work.
+
+When persistent logging is explicitly enabled, the parity probe clears old logs
+and waits for a successful log of its benchmark SELECT. Failing query logging
+then aborts the run instead of producing a faster, incomplete workload. This
+check runs outside warm-up and measurement.
+
+With `oha` or `builtin` and persistent logging enabled, each Stacks database
+load run also verifies that the successful persisted SELECT count matches the
+total warmup and measured request count. A count mismatch, request errors, or
+an empty measured load aborts the run. Counting happens after CPU sampling,
+outside the timed window. Raw warmup output and a `--persistence.json` sidecar
+record the request counts used by this check.
+
+Other drivers do not guarantee that their response counts include every in-flight
+request at the deadline. Their sidecars explicitly mark aggregate persistence
+verification as unavailable; the pre-load parity check still applies.
+
+## Profiles
+
+Stacks has three default profiles. The gap between the first and the third
+row is the price of what Stacks does by default and the others do not do at all,
+and reading it as anything else is the mistake this table exists to prevent.
+
+| Target | What it is |
+|---|---|
+| `stacks` | Stock defaults, and a client that never sends a cookie back. Every GET mints a fresh CSRF render token, which is a real cost for a real first visit. |
+| `stacks-warm` | Stock defaults, client echoes the CSRF cookie — a browser or SPA from its second request onward. |
+| `stacks-minimal` | `STACKS_SECURITY_HEADERS_DISABLE=true`, `csrf: false` for token-only APIs, and `requestIds: false` for deployments whose proxy owns correlation. GET requests carry the same headers as peer targets. Everything else unchanged. |
+| `stacks-no-context` | Opt-in. `stacks-minimal` plus `requestContext: false`, so no async scope is entered per handler and `request()` throws. Prices the ambient request scope on its own. |
+
+### Single-feature comparisons need the warm control
+
+`stacks-no-csrf`, `stacks-no-request-ids`, and `stacks-no-security-headers`
+all echo a CSRF cookie. Compare these opt-in ablations to **`stacks-warm` on
+the same runner**, not to `stacks`. Otherwise GET deltas include both the
+disabled feature and the cold-versus-returning-client difference. Retaining
+more repeats cannot remove that confound. `measurements.json` records the
+exact request headers so the comparison can be audited.
+
+```bash
+bun bench/routing/run.ts --driver oha --rate 10000 --runs 5 --targets stacks,stacks-warm,stacks-no-csrf,stacks-no-request-ids,stacks-no-security-headers
+```
+
+Keep `stacks` in that selection only to price cold-client behavior separately.
+These diagnostic feature costs are not a recommendation to disable security.
+
+The opt-in `stacks-no-context` target is `stacks-minimal` with
+`requestContext: false`, which stops the framework entering an async scope
+around each handler. `request()` throws under it, so it only applies to an
+application whose handlers take their request as an argument. It is here to
+price that scope rather than to produce a number: measured paired against
+`stacks-minimal` over 30-second windows, it is worth 0.12 us/req on
+`static-json` and 0.08 on `path-param`, 4/4 runs each.
+
+**`stacks-minimal` is not a headline number.** It exists to price the
+safe-by-default work separately from the framework's own overhead. Publishing it
+as "Stacks' speed" next to a bare Elysia app would compare a server that sets
+security headers and defends against CSRF with one that does neither. If a
+comparison ever quotes a Stacks-vs-Elysia figure, it either gives Elysia
+equivalent guarantees or it says plainly which profile produced the number.
+
+The opt-in `stacks-wal-full` target measures a configured SQLite deployment:
+1000-page WAL checkpoints and `synchronous=FULL`, with the same security,
+validation, query-tracking, and cookie behavior as `stacks-warm`. It verifies
+both SQLite settings before listening. Run it explicitly:
+
+```bash
+bun bench/routing/run.ts --targets stacks-warm,stacks-wal-full --scenarios db-roundtrip --driver oha
+```
+
+Reports label this target as tuned. It is excluded from the default target
+list, and its database results must not be presented as stock Stacks defaults.
+See the [SQLite configuration guide](../../docs/packages/query-builder.md#sqlite-write-throughput)
+for the checkpoint and backup implications. The memory runner also accepts
+this target with an explicit `--rate`.
+
+The runner resets its profile selectors and security-header switch before
+applying each target's settings, so shell variables from a previous run cannot
+silently turn a stock target into a tuned or minimal one.
+It also fixes the database driver to SQLite, matching the isolated fixture.
+
+## The layer underneath
+
+Between the `bun-raw` ceiling and the Stacks profiles there are two layers, and
+a single number spanning both cannot say which one a change moved. The opt-in
+`bun-router` target is the boundary: everything `bun-raw` pays plus route
+registration, request enhancement and native dispatch, and none of what Stacks
+adds on top.
+
+```bash
+bun bench/routing/run.ts --targets bun-raw,bun-router,stacks-minimal --rate 10000
+```
+
+It registers the same routes through bun-router's own API, returns plain values
+the way its documentation does, and enables the native dispatch Stacks turns on
+by default. It is excluded from the default matrix and from published rankings:
+those compare frameworks, and this is a component of one of them.
+
+## Peer targets
+
+Elysia, Express, Fastify, and Hono are exact dependencies of the isolated
+benchmark package, with `@types/express` beside them so the Express fixture is
+type-checked rather than implicitly `any`. Install its locked dependency set with
+`bun install --cwd bench/routing --frozen-lockfile`. If a dependency is absent,
+the runner records that target as skipped and the report says so rather than
+reporting a zero.
+
+## Flags
+
+```
+--targets      comma-separated target ids
+--scenarios    comma-separated scenario ids
+--driver       oha | bombardier | autocannon | builtin
+--connections  concurrent connections (default 50)
+--rate         hold every target to this fixed req/s and report CPU per request
+--warmup       seconds discarded before measuring (default 5)
+--duration     seconds measured (default 30)
+--runs         repeats per scenario, median reported (default 3)
+--no-db        skip the SQLite fixture and the db-roundtrip scenario
+--allow-busy-host
+               run despite competing processes using 75% of a core
+--output       explicit output directory (default results/<timestamp>)
+```
+
+## Recorded numbers
+
+**There is no recorded baseline yet.** No run has been made on a machine that
+meets the bar above, so this directory deliberately contains no results, and
+nothing in the marketing copy quotes a routing throughput figure.
+
+Direction-only figures from the optimization work are in the git log, on the
+commits that produced them - `git log --grep="perf(router)"`. They were taken
+with the built-in generator on a developer laptop, they are labelled as such in
+every message, and they exist to say "that change helped", not "this is how fast
+Stacks is".
+
+To record a real baseline:
+
+1. Get a dedicated or reserved instance for the runner and target server.
+2. Install `oha` there (`brew install oha` / `cargo install oha`).
+3. Run `bun install --cwd bench/routing --frozen-lockfile` so every pinned peer
+   framework is present.
+4. `bun bench/routing/run.ts` with the defaults (5s warm-up, 30s measured, 3 runs).
+5. Commit the whole `results/<timestamp>/` directory - report, measurements, and
+   the raw per-run output. The spread column is the honesty check: if it is
+   wide, the run is noise and the median means nothing.
+
+For a remote-generator study, orchestrate the two hosts outside this runner and
+label the resulting topology separately. Do not present it as this runner's
+same-host output.
+
+Only then does any public-facing comparison get to quote a number, and only with
+the profile it came from named beside it.
+
+## Regression watching
+
+Once a baseline exists on known hardware, re-run `static-json` on a schedule and
+alert when throughput drops more than ~15% against it. Per-request CPU cost is
+the better regression signal where the hardware is not known - a shared runner's
+throughput moves with its neighbours, while the CPU a server charges for the
+same fixed work does not - so `--rate` is worth watching on a tighter band. Scheduled and
+non-blocking, not a per-PR gate: shared runners vary enough that a hard gate
+would fail merges for reasons that have nothing to do with the change, and a
+flaky gate stops being read long before it catches anything real.
