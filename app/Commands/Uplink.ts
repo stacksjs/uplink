@@ -219,6 +219,13 @@ export default defineCommand((cli) => {
       const built = `${appDir}/storage/framework/desktop-dmg/Uplink-${version}.dmg`
       const stable = `${appDir}/storage/framework/desktop-dmg/Uplink.dmg`
       copyFileSync(built, stable)
+      // The homepage's download button states the version and size; commit this.
+      await Bun.write(`${appDir}/resources/data/release.json`, `${JSON.stringify({
+        version,
+        bytes: Bun.file(built).size,
+        minimumMacOS: '13',
+        url: 'https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg',
+      }, null, 2)}\n`)
       step(['gh', 'release', 'create', `v${version}`, stable, built, '--title', `Uplink ${version}`, '--notes', `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.`, ...(options.draft ? ['--draft'] : [])])
       process.exit(0)
     })

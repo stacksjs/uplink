@@ -44,12 +44,17 @@ const words = [
   { word: 'ping', does: 'check it is alive' },
 ]
 
-const setup = [
-  { verb: 'Install', body: 'Clone it, then build Uplink.app and start it at login.', command: 'git clone https://github.com/stacksjs/uplink && cd uplink\nbun install && ./buddy uplink:install' },
-  { verb: 'Grant access', body: 'In System Settings, Privacy & Security, Full Disk Access, switch on Uplink. Nothing else gets it.', command: '' },
-  { verb: 'Sign in', body: 'Mint a long-lived token for your Claude plan, then store it from the clipboard.', command: 'claude setup-token\n./buddy env:set CLAUDE_CODE_OAUTH_TOKEN "$(pbpaste | tr -d \'[:space:]\')"' },
-  { verb: 'Text it', body: 'Send yourself ping. The first reply asks once to control Messages.', command: '' },
+import release from '../data/release.json'
+
+const downloadUrl = release.url
+const downloadMeta = `Version ${release.version}, macOS ${release.minimumMacOS} or later, ${Math.round(release.bytes / 1_000_000)} MB`
+
+const install = [
+  { verb: 'Install', body: 'Open the download and drag Uplink to Applications. It is signed and notarized by Apple, so it opens like any other app.' },
+  { verb: 'Follow the menubar', body: 'Uplink lives in the menu bar. Its first screen walks you through Full Disk Access, signing in to Claude and who may text it.' },
+  { verb: 'Text it', body: 'Send yourself "ping" from your iPhone. The first reply asks once to control Messages.' },
 ]
+
 
 const faqs = [
   {
@@ -57,8 +62,12 @@ const faqs = [
     a: 'It depends on how your iPhone routes a message to your own number, so try it once before you rely on it. If it does not arrive, sign the Mac into a second Apple ID and text that instead.',
   },
   {
+    q: 'Why does it need Full Disk Access?',
+    a: 'Messages keeps your texts in a database macOS protects. Uplink reads it to notice texts from the handles you allow, and ignores every other conversation.',
+  },
+  {
     q: 'Do I need an API key?',
-    a: 'No. Uplink runs the Claude Code CLI on the plan you are already logged into, such as Claude Max, through a token from claude setup-token.',
+    a: 'No. Uplink runs the Claude Code CLI on your Claude plan, such as Max, through a token from claude setup-token, which it keeps in your Keychain.',
   },
   {
     q: 'What can it do on my Mac?',
@@ -171,7 +180,7 @@ const faqs = [
         <div class="flex gap-6 items-center text-sm">
           <a href="#how" class="hidden sm:inline hover:opacity-80 u-muted">How it works</a>
           <a href="#questions" class="hidden sm:inline hover:opacity-80 u-muted">Questions</a>
-          <a href="#setup" class="u-btn u-btn-primary" style="padding: .5rem 1rem">Set it up</a>
+          <a href="{{ downloadUrl }}" class="u-btn u-btn-primary" style="padding: .5rem 1rem">Download for Mac</a>
         </div>
       </nav>
     </header>
@@ -186,9 +195,9 @@ const faqs = [
             Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac.
           </p>
           <div class="flex flex-wrap gap-3 mt-8 u-rise" style="--i: 2">
-            <a href="#setup" class="u-btn u-btn-primary">
-              Set it up
-              <span class="size-4 i-hugeicons-arrow-right-01" aria-hidden="true"></span>
+            <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
+              <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
+              Download for Mac
             </a>
             <a href="#how" class="u-btn u-btn-ghost">How it works</a>
           </div>
@@ -304,22 +313,43 @@ const faqs = [
         </div>
       </section>
 
-      <section id="setup" class="border-t scroll-mt-16 u-line" aria-labelledby="setup-title">
-        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
-          <h2 id="setup-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Set it up in four steps.</h2>
-          <p class="mt-4 max-w-[60ch] u-muted">You need a Mac signed in to Messages, Bun, the Claude Code CLI and a Claude plan.</p>
+      <section id="download" class="border-t scroll-mt-16 u-line" aria-labelledby="download-title">
+        <div class="grid gap-12 items-center lg:gap-16 lg:grid-cols-[1.1fr_0.9fr] mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
+          <div>
+            <h2 id="download-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Download Uplink for Mac.</h2>
+            <p class="mt-4 max-w-[52ch] u-muted">A menubar app. You need the Claude Code CLI and a Claude plan; Uplink takes care of the rest.</p>
+            <div class="flex flex-wrap gap-x-5 gap-y-3 items-center mt-8">
+              <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
+                <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
+                Download for Mac
+              </a>
+              <p class="text-sm u-mono u-muted">{{ downloadMeta }}</p>
+            </div>
 
-          <div class="grid gap-x-10 gap-y-12 md:grid-cols-2 mt-12">
-            @foreach(setup as item)
-              <div class="u-reveal">
-                <h3 class="font-semibold text-xl">{{ item.verb }}</h3>
-                <p class="mt-2 max-w-[52ch] leading-relaxed u-muted">{{ item.body }}</p>
-                @if(item.command)
-                  <pre class="mt-4 p-4 break-words leading-relaxed text-sm whitespace-pre-wrap rounded-2xl u-code u-mono"><code>{{ item.command }}</code></pre>
-                @endif
-              </div>
-            @endforeach
+            <ol class="grid gap-7 mt-12">
+              @foreach(install as step)
+                <li class="u-reveal">
+                  <h3 class="font-semibold text-lg">{{ step.verb }}</h3>
+                  <p class="mt-1 max-w-[52ch] leading-relaxed u-muted">{{ step.body }}</p>
+                </li>
+              @endforeach
+            </ol>
+
+            <p class="mt-10 text-sm u-muted">
+              Rather build it yourself? <a href="https://github.com/stacksjs/uplink#build-from-source" class="underline underline-offset-4 hover:opacity-80">Build it from source</a>.
+            </p>
           </div>
+          <figure class="justify-self-center max-w-[378px] w-full u-reveal">
+            <img
+              src="/images/menubar-setup.png"
+              width="756"
+              height="1192"
+              alt="Uplink's menubar window on first launch, with setup steps to allow reading Messages and to sign in to Claude"
+              loading="lazy"
+              class="block h-auto w-full border rounded-2xl u-line"
+              style="box-shadow: 0 30px 60px -20px rgb(24 24 27 / 0.35)"
+            >
+          </figure>
         </div>
       </section>
 

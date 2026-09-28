@@ -36,7 +36,19 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
 - Runs are recorded in the `runs` table (cost in integer cents, at API rates; on Max nothing is
   billed per run) and shown on the dashboard.
 
-## Setup
+## Install
+
+**[Download Uplink for Mac](https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg)**
+(macOS 13 or later, signed and notarized). Drag it to Applications and open it: the menubar walks you
+through Full Disk Access, signing in to Claude with a token from `claude setup-token` (kept in your
+Keychain), and who may text it. Then text yourself `ping`.
+
+You need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) and a Claude plan.
+
+## Build from source
+
+The same app, run from this repository as a launchd service (bundle id `com.stacksjs.uplink.source`, so
+its Full Disk Access grant is separate from the downloaded app's):
 
 1. **Get it and install the background service.** `uplink:install` creates `.env` and the database
    if they are missing, builds `storage/uplink/Uplink.app` and starts it at login:
@@ -49,34 +61,26 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
    bun install && ./buddy uplink:install
    ```
 
-2. **Grant Full Disk Access to Uplink.app** (System Settings > Privacy & Security > Full Disk
-   Access). Reading Messages needs it, and only Uplink.app gets it, not `bun` or your terminal.
-   `uplink:install` opens the pane and reveals the app in Finder.
+2. **Grant Full Disk Access to Uplink (source)** in System Settings > Privacy & Security.
 
-3. **Log the Claude CLI in with your Max account**, as a long-lived token for a background service:
+3. **Sign in to Claude** with a long-lived token for a background service:
 
    ```bash
    claude setup-token
    ```
 
    ```bash
-   ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token>
+   ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN "$(pbpaste | tr -d '[:space:]')"
    ```
 
-4. **Restart and check:**
-
-   ```bash
-   ./buddy uplink:restart
-   ```
+4. **Check it**, then text yourself `ping`:
 
    ```bash
    ./buddy uplink:doctor
    ```
 
-5. Text yourself `ping`. The first reply makes macOS ask whether Uplink may control Messages: allow it.
-
-Keep the Mac awake and online while you are away: Uplink holds an idle-sleep assertion while it
-runs, but a closed laptop lid still sleeps unless it is on power with an external display.
+Only run one of the two: they share a launchd label, and the downloaded app stops the source service
+when it starts.
 
 ### Texting yourself over satellite
 
@@ -96,6 +100,7 @@ Pushing to `main` deploys https://uplink.stacksjs.com once CI passes (`.github/w
 | `./buddy uplink:restart` | Restart now, e.g. after granting a permission. Editing `.env` restarts it on its own once no run is in progress |
 | `./buddy uplink:uninstall` | Stop it and remove it from login |
 | `./buddy uplink:ask "<prompt>"` | Run one prompt exactly as a text would, without Messages |
+| `./buddy uplink:release` | Build, sign and notarize Uplink.app and publish it to GitHub Releases |
 | `./buddy uplink:watch` | The watcher itself, in the foreground (needs Full Disk Access for your terminal) |
 | `./buddy dev` | The dashboard: setup status, what it is doing, recent texts |
 
