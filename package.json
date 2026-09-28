@@ -86,11 +86,11 @@
     "docs:agent-counts:check": "./buddy docs:agent-counts:check"
   },
   "dependencies": {
-    "stacks": "^0.75.5",
+    "stacks": "^0.75.12",
     "pickier": "^0.1.65",
-    "@stacksjs/env": "^0.75.5",
-    "@stacksjs/path": "^0.75.5",
-    "@stacksjs/actions": "^0.75.5"
+    "@stacksjs/env": "^0.75.12",
+    "@stacksjs/path": "^0.75.12",
+    "@stacksjs/actions": "^0.75.12"
   },
   "workspaces": [
     "storage/framework",
