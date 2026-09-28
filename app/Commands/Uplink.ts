@@ -1,7 +1,7 @@
+import type { EngineId } from '../Uplink/engine'
 import { copyFileSync, existsSync, watch } from 'node:fs'
 import process from 'node:process'
 import { defineCommand } from '@stacksjs/cli'
-import type { EngineId } from '../Uplink/engine'
 import { loadConfig } from '../Uplink/config'
 import { checksPass, runChecks, writeHeartbeat } from '../Uplink/doctor'
 import { ENGINE_IDS, isEngineId } from '../Uplink/engine'

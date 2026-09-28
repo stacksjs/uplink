@@ -2,8 +2,7 @@ import type { UplinkConfig } from './config'
 import type { Engine, EngineId } from './engine'
 import { CodexEngine } from './codex-engine'
 import { systemPrompt } from './config'
-import { ClaudeEngine } from './engine'
-import { ENGINE_IDS } from './engine'
+import { ClaudeEngine, ENGINE_IDS } from './engine'
 
 /**
  * Builds engines from config, so the watcher, the app and the doctor all select
