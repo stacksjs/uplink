@@ -85,12 +85,18 @@ export class ClaudeEngine implements Engine {
     let cancelled = false
     let timedOut = false
 
+    const env: Record<string, string | undefined> = { ...process.env, ...this.options.env }
+    // A .env copied from .env.example carries `CLAUDE_CODE_OAUTH_TOKEN=`; an
+    // empty token must not stand in for the CLI's own login.
+    if (!env.CLAUDE_CODE_OAUTH_TOKEN)
+      delete env.CLAUDE_CODE_OAUTH_TOKEN
+
     const proc: Subprocess<'ignore', 'pipe', 'pipe'> = Bun.spawn([this.options.bin, ...this.args(request)], {
       cwd: request.cwd,
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { ...process.env, ...this.options.env },
+      env,
       // Its own process group, so stopping a run also stops what the agent
       // started (shell commands, test runners, dev servers). Killing only
       // `claude` leaves those holding stdout open, and the run never ends.

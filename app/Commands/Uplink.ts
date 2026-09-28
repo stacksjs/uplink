@@ -1,4 +1,4 @@
-import { watch } from 'node:fs'
+import { copyFileSync, existsSync, watch } from 'node:fs'
 import process from 'node:process'
 import { defineCommand } from '@stacksjs/cli'
 import { loadConfig, systemPrompt } from '../Uplink/config'
@@ -42,6 +42,24 @@ async function openMessages(config: ReturnType<typeof loadConfig>, appDir: strin
       await Bun.sleep(RETRY_OPEN_MS)
     }
   }
+}
+
+/**
+ * What a fresh clone lacks before the service can run: a .env with an app
+ * key, and the tables runs are recorded in. Both steps are idempotent, so
+ * install can always run them.
+ */
+function prepareApp(appDir: string): void {
+  const buddy = `${appDir}/buddy`
+  if (!existsSync(`${appDir}/.env`)) {
+    copyFileSync(`${appDir}/.env.example`, `${appDir}/.env`)
+    console.log('Created .env from .env.example')
+    Bun.spawnSync([buddy, 'key:generate'], { cwd: appDir, stdout: 'ignore', stderr: 'inherit' })
+  }
+  const migrate = Bun.spawnSync([buddy, 'migrate'], { cwd: appDir, stdout: 'ignore', stderr: 'pipe' })
+  if (migrate.exitCode !== 0)
+    throw new Error(`./buddy migrate failed: ${migrate.stderr.toString().trim()}`)
+  console.log('Database ready')
 }
 
 export default defineCommand((cli) => {
@@ -151,6 +169,7 @@ export default defineCommand((cli) => {
     .option('--rebuild', 'Recompile Uplink.app (you will need to grant Full Disk Access again)', { default: false })
     .action(async (options: { rebuild: boolean }) => {
       const paths = servicePaths(process.cwd())
+      prepareApp(process.cwd())
       await install(paths, { rebuild: options.rebuild })
       console.log(`Installed ${paths.bundle}`)
       console.log(`Logs: ${paths.log}`)

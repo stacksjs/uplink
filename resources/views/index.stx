@@ -45,7 +45,7 @@ const words = [
 ]
 
 const setup = [
-  { verb: 'Install', body: 'Builds Uplink.app and starts it at login.', command: './buddy uplink:install' },
+  { verb: 'Install', body: 'Clone it, then build Uplink.app and start it at login.', command: 'git clone https://github.com/stacksjs/uplink && cd uplink\nbun install && ./buddy uplink:install' },
   { verb: 'Grant access', body: 'In System Settings, Privacy & Security, Full Disk Access, switch on Uplink. Nothing else gets it.', command: '' },
   { verb: 'Sign in', body: 'Mint a long-lived token for your Claude plan, then store it from the clipboard.', command: 'claude setup-token\n./buddy env:set CLAUDE_CODE_OAUTH_TOKEN "$(pbpaste | tr -d \'[:space:]\')"' },
   { verb: 'Text it', body: 'Send yourself ping. The first reply asks once to control Messages.', command: '' },
@@ -307,7 +307,7 @@ const faqs = [
       <section id="setup" class="border-t scroll-mt-16 u-line" aria-labelledby="setup-title">
         <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
           <h2 id="setup-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Set it up in four steps.</h2>
-          <p class="mt-4 max-w-[60ch] u-muted">You need a Mac signed in to Messages, the Claude Code CLI and a Claude plan. Run these from the Uplink app directory.</p>
+          <p class="mt-4 max-w-[60ch] u-muted">You need a Mac signed in to Messages, Bun, the Claude Code CLI and a Claude plan.</p>
 
           <div class="grid gap-x-10 gap-y-12 md:grid-cols-2 mt-12">
             @foreach(setup as item)
@@ -343,7 +343,7 @@ const faqs = [
 
     <footer class="border-t u-line">
       <div class="flex flex-col gap-3 sm:flex-row sm:justify-between mx-auto px-4 py-10 sm:px-6 max-w-6xl text-sm u-muted">
-        <p>Uplink is built with <a href="https://stacksjs.com" class="underline underline-offset-4 hover:opacity-80">Stacks</a>.</p>
+        <p>Uplink is built with <a href="https://stacksjs.com" class="underline underline-offset-4 hover:opacity-80">Stacks</a>. The source is <a href="https://github.com/stacksjs/uplink" class="underline underline-offset-4 hover:opacity-80">on GitHub</a>.</p>
         <p>Earth photos: NASA, ISS Expedition 40.</p>
       </div>
     </footer>

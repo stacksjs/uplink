@@ -38,10 +38,15 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
 
 ## Setup
 
-1. **Install the background service.** Builds `storage/uplink/Uplink.app` and starts it at login:
+1. **Get it and install the background service.** `uplink:install` creates `.env` and the database
+   if they are missing, builds `storage/uplink/Uplink.app` and starts it at login:
 
    ```bash
-   ./buddy uplink:install
+   git clone https://github.com/stacksjs/uplink && cd uplink
+   ```
+
+   ```bash
+   bun install && ./buddy uplink:install
    ```
 
 2. **Grant Full Disk Access to Uplink.app** (System Settings > Privacy & Security > Full Disk
@@ -79,6 +84,8 @@ Test this once before relying on it. A text to your own number can be delivered 
 devices without going through the satellite link at all, so confirm the Mac receives a
 self-text sent while in satellite mode. If it does not, use a second Apple ID: sign Messages on
 this Mac into it, and set `UPLINK_ALLOWED` to your own phone number.
+
+Pushing to `main` deploys https://uplink.stacksjs.com once CI passes (`.github/workflows/deploy.yml`).
 
 ## Commands
 
