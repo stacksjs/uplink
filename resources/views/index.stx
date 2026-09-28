@@ -179,7 +179,7 @@ const faqs = [
     <main>
       <section class="grid gap-10 items-center lg:gap-14 lg:grid-cols-[1.05fr_1fr] mx-auto pb-16 pt-12 px-4 sm:px-6 lg:pb-24 lg:pt-20 max-w-6xl">
         <div>
-          <h1 class="font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl lg:text-6xl u-rise" style="--i: 0">
+          <h1 class="font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl xl:text-6xl u-rise" style="--i: 0">
             Off the grid, still one text from Claude.
           </h1>
           <p class="mt-6 max-w-[34rem] leading-relaxed text-lg u-muted u-rise" style="--i: 1">
