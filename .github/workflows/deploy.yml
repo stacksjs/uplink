@@ -1,28 +1,24 @@
 name: Deploy
 
-# Push to deploy.
+# Push to deploy: every commit on main that passes CI ships to
+# https://uplink.stacksjs.com, a tenant on the shared stacks box.
 #
 # Gated on CI rather than firing on the push itself: `buddy deploy` activates a
 # release atomically, so the failure mode of deploying an untested commit is a
-# live site running it, not a red check somebody notices later.
+# live site running it, not a red check somebody notices later. And from CI
+# rather than a laptop: `buddy deploy` tars the working directory, so only a
+# clean checkout guarantees the release is exactly the commit that passed.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
 
-  # Ship a specific commit without pushing, and reach environments that no
-  # branch maps to.
+  # Ship a specific commit without pushing.
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Which environment to deploy
-        type: choice
-        options: [production, staging, development]
-        default: production
 
 concurrency:
-  group: deploy-${{ github.event.inputs.environment || 'production' }}
+  group: deploy-production
   # Never cancel a deploy in flight. Half of one is a release uploaded but not
   # activated, or services restarted against the previous release's env.
   cancel-in-progress: false
@@ -30,11 +26,11 @@ concurrency:
 jobs:
   # Is the commit CI passed still the tip of main?
   #
-  # Deploys queue one at a time, and each checks out the commit its CI run
-  # was for. CI runs are not ordered: when two pushes land close together the
-  # older one can finish CI last, and its deploy then replaces the newer
-  # release with both deploys green. Checked here, when the deploy's turn
-  # comes: if main has moved on, the newer commit's own CI run deploys it.
+  # Deploys queue one at a time, and each checks out the commit its CI run was
+  # for. CI runs are not ordered: when two pushes land close together the older
+  # one can finish CI last, and its deploy would then replace the newer release
+  # with both deploys green. If main has moved on, the newer commit's own CI run
+  # deploys it.
   current:
     if: github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
@@ -58,16 +54,11 @@ jobs:
 
   deploy:
     needs: current
-    # `workflow_run` fires for failed runs too — that is the point of the
-    # gate, so check the conclusion.
-    #
-    # And check what CI ran on. CI also runs for pull requests, and
-    # `branches: [main]` matches the head branch name, so a fork's PR from a
-    # branch called `main` that passed CI would deploy the fork's commit with
-    # the production secrets. Only a push to this repository ships.
-    #
-    # `always()` because `current` is skipped for a manual dispatch, which
-    # ships whatever it was pointed at.
+    # Only a green CI run for a push to this repository ships. CI also runs for
+    # pull requests, and `branches: [main]` matches the head branch NAME, so a
+    # fork's PR from a branch called main would otherwise deploy the fork's
+    # commit with the production secrets. `always()` because `current` is
+    # skipped for a manual dispatch, which ships whatever it was pointed at.
     if: >-
       always() && (
       github.event_name == 'workflow_dispatch' ||
@@ -76,67 +67,101 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository &&
       needs.current.outputs.latest == 'true'))
     runs-on: ubuntu-latest
-    # Attach a GitHub Environment to get required reviewers and to scope these
-    # secrets to it.
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    environment:
+      name: production
+      url: https://uplink.stacksjs.com
 
     steps:
-      # A fresh app has nowhere to deploy to, and a red X on day one is worse
-      # than no deploy, so every step below is gated on the two secrets that
-      # cannot be defaulted. Without them this finishes green with a notice
-      # saying exactly what to add.
+      # A deploy that cannot deploy is a failure, not a quiet skip: a green run
+      # that did nothing leaves a stale site up with nobody looking. Checked in
+      # a step because a job-level `if:` cannot read secrets.
       #
-      # Checked here rather than in `if:` on the job, because a job-level
-      # condition cannot read `secrets`.
+      # Infrastructure credentials live here and NOT in .env.production, which
+      # is decrypted onto a box a dozen other sites share. A release on disk
+      # should not carry tokens that can delete servers or rewrite DNS.
       - name: Is deployment configured?
-        id: check
         env:
           DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -n "$DOTENV_PRIVATE_KEY_PRODUCTION" ] && [ -n "$DEPLOY_SSH_KEY" ]; then
-            echo 'configured=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::Deployment is not configured, so this run did nothing. Add DEPLOY_SSH_KEY (a private key the target server trusts) and DOTENV_PRIVATE_KEY_PRODUCTION (from .env.keys) to deploy on every green push to main.'
+          missing=
+          [ -z "$DOTENV_PRIVATE_KEY_PRODUCTION" ] && missing="$missing DOTENV_PRIVATE_KEY_PRODUCTION"
+          [ -z "$DEPLOY_SSH_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          # Needed even though this deploy attaches to an existing box: the
+          # server is still resolved through the Hetzner API.
+          [ -z "$HCLOUD_TOKEN" ] && missing="$missing HCLOUD_TOKEN"
+          # The host's DNS records and edge rules live in the stacksjs.com
+          # Cloudflare zone.
+          [ -z "$CLOUDFLARE_API_TOKEN" ] && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "$CLOUDFLARE_ACCOUNT_ID" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Deployment is not configured, so nothing was deployed. Missing secrets:$missing"
+            exit 1
           fi
 
       - name: Checkout
-        if: steps.check.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           # The exact commit CI approved, not whatever main points at now.
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Setup Bun
-        if: steps.check.outputs.configured == 'true'
-        uses: oven-sh/setup-bun@v2
-
+      # The same pinned action CI uses. Its download can fail with "socket hang
+      # up" and only warn, so the next step makes sure a bun is on PATH anyway.
       - name: Setup Pantry
-        if: steps.check.outputs.configured == 'true'
-        uses: home-lang/pantry/packages/action@main
+        continue-on-error: true
+        uses: pantry-pm/pantry/packages/action@fa35547da630b14beda5b26a2625490864d5c963 # v0.11.60
+        with:
+          install: 'false'
+
+      - name: Make sure bun is installed
+        run: |
+          if command -v bun >/dev/null 2>&1; then
+            bun --version
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            curl -fsSL https://bun.sh/install | bash && break
+            echo "bun install attempt $attempt failed; retrying"
+            sleep $((attempt * 10))
+          done
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
-        if: steps.check.outputs.configured == 'true'
         run: bun install --frozen-lockfile
 
-      # The deploy talks to the server as root over SSH with BatchMode on, so
-      # the key has to be in an agent before it runs — there is no prompt to
-      # fall back to.
+      # `buddy deploy` ships the environment it runs with. With no usable
+      # APP_KEY it generates a random one, which replaces production's and
+      # signs every session out while the deploy reports success. The key is
+      # committed encrypted in .env.production; prove it decrypts before
+      # anything reaches the server.
+      - name: Check the production env decrypts
+        env:
+          DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
+        run: |
+          bun -e '
+            const { decryptValue } = await import("@stacksjs/env")
+            const file = await Bun.file(".env.production").text()
+            const raw = file.match(/^APP_KEY="?([^"\n]+)"?/m)?.[1]
+            if (!raw) throw new Error(".env.production has no APP_KEY")
+            const key = raw.startsWith("encrypted:") ? decryptValue(raw, process.env.DOTENV_PRIVATE_KEY_PRODUCTION) : raw
+            if (!/^base64:.{40,}/.test(key)) throw new Error("APP_KEY did not decrypt to a usable key - is DOTENV_PRIVATE_KEY_PRODUCTION the key from .env.keys?")
+            console.log("APP_KEY decrypts")
+          '
+
+      # The deploy talks to the box as root over SSH with BatchMode on, so the
+      # key has to be in an agent before it runs.
       - name: Load the deploy key
-        if: steps.check.outputs.configured == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      # An agent is not enough on its own. ts-cloud reads the PUBLIC key off
-      # disk to register it on the server, and an agent holds keys in memory
-      # and exposes no path, so the deploy died on "SSH public key not found
-      # at ~/.ssh/id_ed25519.pub" with the agent perfectly loaded. The public
-      # half is derived from the private one rather than carried as a second
-      # secret, so the two can never disagree.
+      # ts-cloud also reads the PUBLIC key off disk to register it, and an
+      # agent exposes no path. Derived from the private key rather than kept as
+      # a second secret, so the two can never disagree.
       - name: Write the deploy key to disk
-        if: steps.check.outputs.configured == 'true'
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
@@ -147,21 +172,55 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
           chmod 644 ~/.ssh/id_ed25519.pub
 
+      # What is serving now, so the check afterwards can tell a new release
+      # from the old one still being up.
+      - name: Record the live build
+        id: before
+        run: |
+          build=$(curl -fsS --max-time 20 https://uplink.stacksjs.com/ 2>/dev/null | grep -o 'name="stx-build" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"//') || build=
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Serving before this deploy: ${build:-(nothing reachable)}"
+
       - name: Deploy
-        if: steps.check.outputs.configured == 'true'
-        run: ./buddy deploy --${{ github.event.inputs.environment == 'staging' && 'staging' || github.event.inputs.environment == 'development' && 'dev' || 'prod' }} --yes
+        run: ./buddy deploy --prod --yes
         env:
-          # Decrypts .env.production. Without it the encrypted values silently
-          # fall back to defaults, which is how an app deploys with the wrong
-          # APP_KEY and invalidates every session it had.
+          APP_ENV: production
+          APP_URL: uplink.stacksjs.com
           DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
-          # DNS records are written through the registrar that administers the
-          # zone, declared in config/cloud.ts. Keep these in the environment
-          # even when they are also in .env.production — a missing one now
-          # fails loudly instead of reaching for another provider's keys.
-          PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
-          PORKBUN_SECRET_KEY: ${{ secrets.PORKBUN_SECRET_KEY }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # macOS resource forks in a tarball built on a developer machine make
-          # the extraction on the server noisy and occasionally fatal.
-          COPYFILE_DISABLE: '1'
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # `buddy deploy` knows it uploaded and activated a release, not that the
+      # public name now serves it through DNS, Cloudflare and the gateway.
+      # `stx-build` changes on every build, so a different value is the new
+      # release actually being served. Then the two things a stale edge or a
+      # broken release would take out: the CSRF cookie the city form needs, and
+      # the tour data.
+      - name: Verify the deploy is live
+        env:
+          BEFORE: ${{ steps.before.outputs.build }}
+        run: |
+          url=https://uplink.stacksjs.com/
+          for attempt in $(seq 1 30); do
+            now=$(curl -fsS --max-time 20 "$url" 2>/dev/null | grep -o 'name="stx-build" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"//') || now=
+            if [ -n "$now" ] && [ "$now" != "$BEFORE" ]; then
+              echo "Serving build $now (was ${BEFORE:-nothing})."
+              break
+            fi
+            echo "attempt $attempt: still serving ${now:-nothing}"
+            [ "$attempt" = 30 ] && { echo "::error::$url never began serving a new build after the deploy reported success."; exit 1; }
+            sleep 10
+          done
+
+          status() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${url}$1"; }
+          # The dashboard lists who may text the Mac and everything they asked;
+          # it exists only on that Mac. A 200 here is a privacy regression.
+          [ "$(status dashboard)" = 404 ] || { echo "::error::/dashboard answers $(status dashboard) in production - it must 404."; exit 1; }
+          # The framework's default views (auth, storefront) are off for this
+          # one-page site; serving them again means ui.defaultViews regressed.
+          for path in login cart checkout/payment errors/tester; do
+            [ "$(status "$path")" = 404 ] || { echo "::error::/$path answers $(status "$path") - framework default views are being served."; exit 1; }
+          done
+          [ "$(status images/california-night-960.jpg)" = 200 ] || { echo "::error::The hero image is not being served."; exit 1; }
+          echo "Home page, 404s and assets check out."
