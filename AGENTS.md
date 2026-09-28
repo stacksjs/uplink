@@ -76,6 +76,13 @@ Read the skill before building. The full list lives in `storage/framework/defaul
 Every skill also has a docs page at https://stacksjs.com/docs/skills, one per skill, grouped by section
 (`docs/skills/` in the framework repository; a scaffolded app's `docs/` is its own).
 
+**This app's own skill: read `app/Skills/uplink-conventions/SKILL.md` before touching anything under
+`app/Uplink/`, `app/Desktop/` or `config/`.** Two corrections that look obvious fail silently here:
+`config/uplink.ts` is not loaded by `@stacksjs/config`, whose override list is hardcoded and has no
+`uplink` key, so `config.uplink` is `undefined` rather than an error; and a name in
+`server-auto-imports.d.ts` is only a declaration, so a global that `injectGlobalAutoImports()` never
+installed typechecks and then throws at runtime. The skill has the working forms of both.
+
 ### Backend / API
 | Task | Skill |
 |---|---|
