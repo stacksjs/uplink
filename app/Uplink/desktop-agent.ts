@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import type { Server } from 'bun'
 import type { UplinkConfig } from './config'
+import type { EngineId, EngineInstall, EngineProbe, ProbeReason } from './engine'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -41,7 +42,25 @@ const LOCK_PATH = join(DATA_DIR, 'uplink.pid')
 const LAUNCH_AGENT = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
 const RETRY_OPEN_MS = 5_000
 
-type EngineState = { ok: boolean, detail: string, checkedAt: number }
+type EngineState = EngineProbe & { checkedAt: number }
+
+/**
+ * One row of the popover's setup list. Declared rather than inferred, because
+ * the entries genuinely differ (only an engine row carries `install`) and an
+ * inferred union puts the shared fields out of reach.
+ */
+interface PopoverCheck {
+  id: string
+  name: string
+  ok: boolean
+  detail: string
+  /** Shown, but not counted towards readiness. */
+  informational: boolean
+  engineId?: EngineId
+  label?: string
+  reason?: ProbeReason
+  install?: EngineInstall
+}
 
 export interface DesktopAgent {
   port: number
@@ -218,7 +237,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       queued: run.queued,
     })) ?? []
     const allowed = uplink?.allowedHandles ?? settings.allowed
-    const checks = [
+    const checks: PopoverCheck[] = [
       {
         id: 'fda',
         name: 'Read Messages',
@@ -229,13 +248,19 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       ...allEngines(config).map((engine) => {
         const state = engines.get(engine.id)
         const selected = engine.id === config.engine
+        const reason = state?.reason ?? 'failed'
+        const missing = reason === 'missing'
         return {
           // `engine` is the selected one, and the popover draws its sign-in
           // step. The other is listed so switching is discoverable.
           id: selected ? 'engine' : `engine:${engine.id}`,
-          name: selected ? `Sign in to ${engine.label}` : engine.label,
+          // A missing CLI is not a sign-in problem, and calling it one sends
+          // the person to run a command that does not exist either.
+          name: missing ? `Install ${engine.label}` : selected ? `Sign in to ${engine.label}` : engine.label,
           engineId: engine.id,
           label: engine.label,
+          reason,
+          install: engine.install,
           ok: state?.ok ?? false,
           detail: checkingEngines && !state ? 'Checking' : (state?.detail ?? 'Not checked yet'),
           informational: !selected,
@@ -299,6 +324,15 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         case '/api/open/full-disk-access':
           Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'])
           return json({ ok: true })
+
+        case '/api/open/install-docs': {
+          // The selected engine's own documentation, so the link cannot drift
+          // from the command shown beside it.
+          const { url } = allEngines(config).find(engine => engine.id === config.engine)?.install ?? { url: '' }
+          if (url)
+            Bun.spawnSync(['open', url])
+          return json({ ok: Boolean(url), url })
+        }
 
         case '/api/open/terminal': {
           // Both sign-ins need a real terminal for their browser round trip.

@@ -210,7 +210,7 @@ describe('CodexEngine', () => {
       // The real CLI prints this on stderr, not stdout.
       writeFileSync(path, '#!/bin/sh\necho "Logged in using ChatGPT" >&2\nexit 0\n')
       chmodSync(path, 0o755)
-      expect(await engine(path).probe()).toEqual({ ok: true, detail: 'Logged in using ChatGPT' })
+      expect(await engine(path).probe()).toEqual({ ok: true, reason: 'ok', detail: 'Logged in using ChatGPT' })
     })
 
     it('is not signed in when it exits non-zero', async () => {
@@ -219,13 +219,17 @@ describe('CodexEngine', () => {
       chmodSync(path, 0o755)
       const probe = await engine(path).probe()
       expect(probe.ok).toBe(false)
+      expect(probe.reason).toBe('signed-out')
       expect(probe.detail).toContain('Not logged in')
     })
 
-    it('says so when the binary is missing', async () => {
+    it('reports a missing binary as missing, not as signed out', async () => {
+      // These are different problems with different next steps, and setup used
+      // to collapse them into one.
       const probe = await engine(join(dir, 'not-installed')).probe()
       expect(probe.ok).toBe(false)
-      expect(probe.detail).toContain('Is Codex installed?')
+      expect(probe.reason).toBe('missing')
+      expect(probe.detail).toContain('not installed')
     })
   })
 })

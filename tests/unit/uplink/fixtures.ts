@@ -1,4 +1,4 @@
-import type { Engine, EngineEvent, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
+import type { Engine, EngineEvent, EngineProbe, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
 import type { ReplyTarget, Sender } from '../../../app/Uplink/sender'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync } from 'node:fs'
@@ -148,10 +148,11 @@ export class FakeEngine implements Engine {
   readonly id = 'claude' as const
   readonly label = 'Claude Code'
   readonly authFailureHint = 'run "claude setup-token" on the Mac and give Uplink the token'
+  readonly install = { command: 'bun install -g @anthropic-ai/claude-code', url: 'https://docs.claude.com/en/docs/claude-code' }
 
-  probeResult: { ok: boolean, detail: string } = { ok: true, detail: 'Signed in' }
+  probeResult: EngineProbe = { ok: true, reason: 'ok', detail: 'Signed in' }
 
-  async probe(): Promise<{ ok: boolean, detail: string }> {
+  async probe(): Promise<EngineProbe> {
     this.probes += 1
     return this.probeResult
   }

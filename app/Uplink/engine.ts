@@ -53,10 +53,32 @@ export function isEngineId(value: string): value is EngineId {
   return (ENGINE_IDS as readonly string[]).includes(value)
 }
 
+/**
+ * Why an engine cannot answer. These are three different problems with three
+ * different next steps, and setup used to collapse them into one: a missing
+ * binary was reported inside the "Sign in" step, which sends the person to run
+ * a command that does not exist either.
+ */
+export type ProbeReason = 'ok' | 'missing' | 'signed-out' | 'failed'
+
 /** Whether a CLI can answer right now, for the doctor and the menubar. */
 export interface EngineProbe {
   ok: boolean
+  reason: ProbeReason
   detail: string
+}
+
+/** Where to get an engine that is not installed. */
+export interface EngineInstall {
+  command: string
+  url: string
+}
+
+/** True when `bin` is something this machine can actually run. */
+export function binaryExists(bin: string): boolean {
+  // An absolute path from findClaude/findCodex, or a bare name to resolve
+  // against PATH, which the launchers widen before anything spawns.
+  return bin.includes('/') ? Bun.file(bin).size > 0 : Bun.which(bin) !== null
 }
 
 export interface Engine {
@@ -68,6 +90,8 @@ export interface Engine {
    * from the Mac, so this has to name the CLI and the exact command.
    */
   readonly authFailureHint: string
+  /** How to install this CLI, for a Mac that does not have it. */
+  readonly install: EngineInstall
   run: (request: EngineRequest) => EngineRun
   /**
    * Can this CLI answer right now. Separate from `run` because setup has to
@@ -95,6 +119,10 @@ export class ClaudeEngine implements Engine {
   readonly id = 'claude' as const
   readonly label = 'Claude Code'
   readonly authFailureHint = 'run "claude setup-token" on the Mac and give Uplink the token'
+  readonly install: EngineInstall = {
+    command: 'bun install -g @anthropic-ai/claude-code',
+    url: 'https://docs.claude.com/en/docs/claude-code',
+  }
 
   constructor(private readonly options: ClaudeEngineOptions) {}
 
@@ -104,6 +132,11 @@ export class ClaudeEngine implements Engine {
    * rejected with a 401 on first use.
    */
   async probe(): Promise<EngineProbe> {
+    // Asked before spawning, because a missing binary and a logged-out one are
+    // different problems and Bun throws rather than exiting 127 for the former.
+    if (!binaryExists(this.options.bin))
+      return { ok: false, reason: 'missing', detail: 'Claude Code is not installed on this Mac.' }
+
     try {
       const proc = Bun.spawn([this.options.bin, '-p', 'Reply with exactly: ok', '--model', 'haiku', '--output-format', 'json'], {
         cwd: tmpdir(),
@@ -119,12 +152,18 @@ export class ClaudeEngine implements Engine {
       const result = JSON.parse(text) as { is_error?: boolean, result?: string }
       if (result.is_error) {
         const said = truncate(result.result ?? 'Claude did not answer', 140)
-        return { ok: false, detail: AUTH_FAILURE.test(said) ? 'Not signed in yet.' : said }
+        return AUTH_FAILURE.test(said)
+          ? { ok: false, reason: 'signed-out', detail: 'Not signed in yet.' }
+          : { ok: false, reason: 'failed', detail: said }
       }
-      return { ok: true, detail: this.env().CLAUDE_CODE_OAUTH_TOKEN ? 'Signed in with your token' : 'Signed in through the Claude CLI' }
+      return {
+        ok: true,
+        reason: 'ok',
+        detail: this.env().CLAUDE_CODE_OAUTH_TOKEN ? 'Signed in with your token' : 'Signed in through the Claude CLI',
+      }
     }
-    catch {
-      return { ok: false, detail: `Could not run ${this.options.bin}. Is Claude Code installed?` }
+    catch (error) {
+      return { ok: false, reason: 'failed', detail: `Could not run ${this.options.bin}: ${error instanceof Error ? error.message : String(error)}` }
     }
   }
 

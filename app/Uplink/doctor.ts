@@ -1,5 +1,5 @@
 import type { UplinkConfig } from './config'
-import type { Engine } from './engine'
+import type { Engine, ProbeReason } from './engine'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { allEngines } from './engines'
@@ -61,14 +61,23 @@ export async function readHeartbeat(appDir: string): Promise<Heartbeat | null> {
 const HEARTBEAT_STALE_MS = 2 * 60_000
 
 /**
- * What to do about an engine that cannot answer. The engine's own
- * `authFailureHint` is written for a text message, so it names the CLI and the
- * command but not the surrounding `.env` step this install needs.
+ * What to do about an engine that cannot answer, which depends on why.
+ *
+ * A missing CLI used to be reported inside the sign-in step, so the person was
+ * told to run a command that does not exist either. These are three problems
+ * with three different next steps.
  */
-function engineFix(engine: Engine): string {
-  return engine.id === 'claude'
-    ? 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart'
-    : 'Run codex login (or codex login --device-auth if you are on SSH), then ./buddy uplink:restart'
+function engineFix(engine: Engine, reason: ProbeReason): string {
+  if (reason === 'missing')
+    return `Install it: ${engine.install.command} (see ${engine.install.url}), then ./buddy uplink:restart`
+
+  if (reason === 'signed-out') {
+    return engine.id === 'claude'
+      ? 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart'
+      : 'Run codex login (or codex login --device-auth if you are on SSH), then ./buddy uplink:restart'
+  }
+
+  return `${engine.label} is installed and signed in, but did not answer. The detail above is what it said.`
 }
 
 export async function runChecks(config: UplinkConfig, appDir: string): Promise<Check[]> {
@@ -119,16 +128,20 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
   for (const engine of allEngines(config)) {
     const selected = engine.id === config.engine
     const probe = await engine.probe()
+    const name = probe.reason === 'missing'
+      ? `${engine.label} (not installed)`
+      : selected ? `${engine.label} account` : `${engine.label} (available, not selected)`
+
     checks.push({
-      name: selected ? `${engine.label} account` : `${engine.label} (available, not selected)`,
+      name,
       ok: probe.ok,
       detail: probe.detail,
       informational: !selected,
       fix: probe.ok
         ? undefined
         : selected
-          ? engineFix(engine)
-          : `Optional. To use it, set UPLINK_ENGINE=${engine.id} in .env, then: ${engineFix(engine)}`,
+          ? engineFix(engine, probe.reason)
+          : `Optional. To use it, set UPLINK_ENGINE=${engine.id} in .env, then: ${engineFix(engine, probe.reason)}`,
     })
   }
 

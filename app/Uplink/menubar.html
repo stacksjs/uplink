@@ -94,6 +94,18 @@
           <div data-when-todo>
             <label for="engine">Answer texts with</label>
             <select id="engine"></select>
+            <!-- A missing CLI is not a sign-in problem. Nothing below applies
+                 until it is installed, so the sign-in blocks are hidden. -->
+            <div id="engine-missing" hidden>
+              <p class="help"><strong data-missing-label></strong> is not installed on this Mac. Uplink runs it for you, but it cannot install it.</p>
+              <label for="install-command">Install it with</label>
+              <input id="install-command" readonly spellcheck="false">
+              <div class="actions">
+                <button data-action="copy-install">Copy command</button>
+                <button data-action="open-install-docs">Open the docs</button>
+                <button class="primary" data-action="test-engine">Check again</button>
+              </div>
+            </div>
             <!-- Each CLI signs in its own way, so only the selected one's
                  instructions are shown. -->
             <div data-engine-only="claude">
@@ -198,8 +210,17 @@
       }
       picker.value = selected
 
+      // A missing CLI replaces the sign-in instructions rather than sitting
+      // above them: signing in is not possible until it exists.
+      const missing = check?.reason === 'missing'
+      $('#engine-missing').hidden = !missing
+      if (missing) {
+        $('[data-missing-label]').textContent = label
+        $('#install-command').value = check.install?.command || ''
+      }
+
       for (const node of document.querySelectorAll('[data-engine-only]'))
-        node.hidden = node.dataset.engineOnly !== selected
+        node.hidden = missing || node.dataset.engineOnly !== selected
     }
 
     function render(status) {
@@ -311,6 +332,17 @@
       'open-fda': () => api('/api/open/full-disk-access', {}),
       'open-terminal': () => api('/api/open/terminal', {}),
       'test-engine': () => api('/api/engine/test', {}).then(refresh),
+      'copy-install': async () => {
+        const field = $('#install-command')
+        field.select()
+        // The webview may refuse the async clipboard API without a secure
+        // origin, so fall back to the selection the person can copy themselves.
+        try {
+          await navigator.clipboard.writeText(field.value)
+        }
+        catch {}
+      },
+      'open-install-docs': () => api('/api/open/install-docs', {}),
       'save-token': async () => {
         const error = $('#token-error')
         error.hidden = true
