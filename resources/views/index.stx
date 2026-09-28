@@ -12,7 +12,7 @@
  * No client script: motion is CSS only, and every animation has a
  * reduced-motion fallback.
  */
-const siteUrl = 'https://uplink.stacksjs.com'
+const path = '/'
 const title = 'Uplink - text your Mac, get Claude, even over satellite'
 const description = 'Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac.'
 
@@ -45,15 +45,19 @@ const words = [
 ]
 
 import release from '../data/release.json'
+import { formatCents, PLANS, yearlySavingPercent } from '../../app/Billing/plans'
 
 const downloadUrl = release.url
 const downloadMeta = `Version ${release.version}, macOS ${release.minimumMacOS} or later, ${Math.round(release.bytes / 1_000_000)} MB`
 
 const install = [
   { verb: 'Install', body: 'Open the download and drag Uplink to Applications. It is signed and notarized by Apple, so it opens like any other app.' },
-  { verb: 'Follow the menubar', body: 'Uplink lives in the menu bar. Its first screen walks you through Full Disk Access, signing in to Claude and who may text it.' },
-  { verb: 'Text it', body: 'Send yourself "ping" from your iPhone. The first reply asks once to control Messages.' },
+  { verb: 'Say yes three times', body: 'Uplink sets itself up. It opens the one switch in System Settings it needs, signs in to Claude in your browser, and asks once to use Messages. It finds your numbers by itself.' },
+  { verb: 'Text it', body: 'Send yourself "ping" from your iPhone. The answer starts with a satellite.' },
 ]
+
+const pricing = PLANS.map(plan => ({ ...plan, price: formatCents(plan.priceCents) }))
+const yearlySaving = yearlySavingPercent()
 
 
 const faqs = [
@@ -67,7 +71,7 @@ const faqs = [
   },
   {
     q: 'Do I need an API key?',
-    a: 'No. Uplink runs the Claude Code CLI on your Claude plan, such as Max, through a token from claude setup-token, which it keeps in your Keychain.',
+    a: 'No. Uplink runs Claude Code on your Claude plan, such as Max. It signs in through your browser and keeps the token in your Keychain.',
   },
   {
     q: 'What can it do on my Mac?',
@@ -75,7 +79,11 @@ const faqs = [
   },
   {
     q: 'What does it cost?',
-    a: 'Nothing on top of your Claude plan. The dashboard shows what each run would have cost at API rates, in cents, so you can see what you use.',
+    a: '$1.99 a month, $19.99 a year, or $29.99 once. That is for Uplink itself; the answers run on your own Claude plan, and nothing is charged per text.',
+  },
+  {
+    q: 'Can it answer with ChatGPT instead?',
+    a: 'Yes. Choose Codex in the menubar and Uplink answers with your ChatGPT plan instead of Claude. Everything else works the same way.',
   },
   {
     q: 'What happens while my Mac sleeps?',
@@ -88,102 +96,11 @@ const faqs = [
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ title }}</title>
-    <meta name="description" content="{{ description }}">
-    <link rel="canonical" href="{{ siteUrl }}/">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="{{ siteUrl }}/">
-    <meta property="og:title" content="{{ title }}">
-    <meta property="og:description" content="{{ description }}">
-    <meta property="og:image" content="{{ siteUrl }}/images/california-night-1920.jpg">
-    <meta property="og:image:alt" content="The California coast at night, photographed from the International Space Station">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="color-scheme" content="light dark">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap">
+    @include('site-head')
     <link rel="preload" as="image" href="/images/california-night-1920.jpg" imagesrcset="/images/california-night-960.jpg 960w, /images/california-night-1920.jpg 1920w" imagesizes="(min-width: 1024px) 50vw, 100vw">
-    <style>
-      /* Tokens. One accent: sodium amber, the colour of the city lights in the photos. */
-      :root {
-        --paper: #fafaf9;
-        --ink: #18181b;
-        --muted: #52525b;
-        --line: #e4e4e7;
-        --raised: #ffffff;
-        --accent: #f59e0b;
-        --accent-ink: #b45309;
-        --accent-wash: #fffbeb;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #0c0c0e;
-          --ink: #f4f4f5;
-          --muted: #a1a1aa;
-          --line: #27272a;
-          --raised: #141417;
-          --accent-ink: #fbbf24;
-          --accent-wash: #1c1508;
-        }
-      }
-
-      html body.uplink { background: var(--paper); color: var(--ink); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; }
-      .uplink .u-mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace; }
-      .uplink .u-muted { color: var(--muted); }
-      .uplink .u-accent { color: var(--accent-ink); }
-      .uplink .u-line { border-color: var(--line); }
-      .uplink .u-raised { background: var(--raised); }
-      .uplink .u-wash { background: var(--accent-wash); }
-
-      /* Buttons: pills. Containers: 16px. That is the whole radius system. */
-      .uplink .u-btn { display: inline-flex; align-items: center; gap: .5rem; white-space: nowrap; border-radius: 9999px; padding: .75rem 1.25rem; font-weight: 600; transition: transform .2s cubic-bezier(.16, 1, .3, 1), background-color .2s; }
-      .uplink .u-btn:active { transform: translateY(1px) scale(.98); }
-      .uplink .u-btn-primary { background: var(--accent); color: #18181b; }
-      .uplink .u-btn-primary:hover { background: #fbbf24; }
-      .uplink .u-btn-ghost { border: 1px solid var(--line); color: var(--ink); }
-      .uplink .u-btn-ghost:hover { border-color: var(--muted); }
-      .uplink a:focus-visible, .uplink summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
-
-      .uplink .u-nav { background: color-mix(in srgb, var(--paper) 82%, transparent); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); }
-      @media (prefers-reduced-transparency: reduce) { .uplink .u-nav { background: var(--paper); backdrop-filter: none; } }
-
-      .uplink .u-code { background: #111113; color: #e4e4e7; border: 1px solid var(--line); }
-      .uplink .u-code .u-prompt { color: #fbbf24; user-select: none; }
-
-      .uplink details > summary { list-style: none; cursor: pointer; }
-      .uplink details > summary::-webkit-details-marker { display: none; }
-      .uplink details[open] .u-chevron { transform: rotate(45deg); }
-      .uplink .u-chevron { transition: transform .25s cubic-bezier(.16, 1, .3, 1); }
-
-      /* Motion. The hero arrives in reading order; each exchange reveals
-         question first, then answer, the order a text thread fills in. */
-      @media (prefers-reduced-motion: no-preference) {
-        .uplink .u-rise { animation: u-rise .8s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--i, 0) * 90ms); }
-        @keyframes u-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
-
-        @supports (animation-timeline: view()) {
-          .uplink .u-reveal { animation: u-rise linear both; animation-timeline: view(); animation-range: entry 5% cover 30%; }
-          .uplink .u-reveal-late { animation: u-rise linear both; animation-timeline: view(); animation-range: entry 25% cover 40%; }
-        }
-      }
-    </style>
   </head>
   <body class="antialiased uplink">
-    <header class="sticky top-0 border-b u-line u-nav" style="z-index: 20">
-      <nav class="flex items-center justify-between mx-auto px-4 sm:px-6 h-16 max-w-6xl" aria-label="Main">
-        <a href="/" class="flex gap-2 items-center font-semibold text-lg tracking-tight">
-          <span class="size-5 i-hugeicons-satellite-02 u-accent" aria-hidden="true"></span>
-          Uplink
-        </a>
-        <div class="flex gap-6 items-center text-sm">
-          <a href="#how" class="hidden sm:inline hover:opacity-80 u-muted">How it works</a>
-          <a href="#questions" class="hidden sm:inline hover:opacity-80 u-muted">Questions</a>
-          <a href="{{ downloadUrl }}" class="u-btn u-btn-primary" style="padding: .5rem 1rem">Download for Mac</a>
-        </div>
-      </nav>
-    </header>
+    @include('site-nav')
 
     <main>
       <section class="grid gap-10 items-center lg:gap-14 lg:grid-cols-[1.05fr_1fr] mx-auto pb-16 pt-12 px-4 sm:px-6 lg:pb-24 lg:pt-20 max-w-6xl">
@@ -192,15 +109,16 @@ const faqs = [
             Off the grid, still one text from Claude.
           </h1>
           <p class="mt-6 max-w-[34rem] leading-relaxed text-lg u-muted u-rise" style="--i: 1">
-            Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac.
+            Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac, and texts the answer back.
           </p>
           <div class="flex flex-wrap gap-3 mt-8 u-rise" style="--i: 2">
             <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
               <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
               Download for Mac
             </a>
-            <a href="#how" class="u-btn u-btn-ghost">How it works</a>
+            <a href="/pricing" class="u-btn u-btn-ghost">See pricing</a>
           </div>
+          <p class="mt-6 text-sm u-mono u-muted u-rise" style="--i: 3">From $1.99 a month. Signed and notarized. macOS 13+.</p>
         </div>
         <figure class="overflow-hidden rounded-2xl u-rise" style="--i: 1">
           <img
@@ -317,7 +235,7 @@ const faqs = [
         <div class="grid gap-12 items-center lg:gap-16 lg:grid-cols-[1.1fr_0.9fr] mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
           <div>
             <h2 id="download-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Download Uplink for Mac.</h2>
-            <p class="mt-4 max-w-[52ch] u-muted">A menubar app. You need the Claude Code CLI and a Claude plan; Uplink takes care of the rest.</p>
+            <p class="mt-4 max-w-[52ch] u-muted">A menubar app. You need Claude Code on a Claude plan, or Codex on a ChatGPT plan; Uplink takes care of the rest.</p>
             <div class="flex flex-wrap gap-x-5 gap-y-3 items-center mt-8">
               <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
                 <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
@@ -339,17 +257,45 @@ const faqs = [
               Rather build it yourself? <a href="https://github.com/stacksjs/uplink#build-from-source" class="underline underline-offset-4 hover:opacity-80">Build it from source</a>.
             </p>
           </div>
-          <figure class="justify-self-center max-w-[378px] w-full u-reveal">
+          <figure class="justify-self-center max-w-[386px] w-full u-reveal">
             <img
               src="/images/menubar-setup.png"
-              width="756"
-              height="1192"
-              alt="Uplink's menubar window on first launch, with setup steps to allow reading Messages and to sign in to Claude"
+              width="772"
+              height="934"
+              alt="Uplink's menubar popover on first launch: four setup steps, starting with letting Uplink read your texts"
               loading="lazy"
-              class="block h-auto w-full border rounded-2xl u-line"
-              style="box-shadow: 0 30px 60px -20px rgb(24 24 27 / 0.35)"
+              class="block h-auto w-full"
             >
           </figure>
+        </div>
+      </section>
+
+      <section id="pricing" class="border-t scroll-mt-16 u-line" aria-labelledby="pricing-title">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">Pricing</p>
+              <h2 id="pricing-title" class="mt-3 font-semibold text-3xl tracking-tight md:text-4xl">The whole app, however you like to pay.</h2>
+            </div>
+            <a href="/pricing" class="text-sm underline underline-offset-4 hover:opacity-80 u-muted">Compare plans</a>
+          </div>
+          <div class="grid gap-4 mt-10 sm:grid-cols-3">
+            @foreach(pricing as plan)
+              <a href="/checkout/{{ plan.id }}" class="group flex flex-col p-6 border rounded-2xl u-line u-raised u-reveal">
+                <span class="text-sm font-medium u-muted">{{ plan.name }}</span>
+                <span class="mt-3 flex gap-2 items-baseline">
+                  <span class="font-semibold text-4xl tracking-tight u-num">{{ plan.price }}</span>
+                  <span class="u-muted">{{ plan.cadence }}</span>
+                </span>
+                <span class="mt-2 text-sm u-muted">{{ plan.blurb }}</span>
+                <span class="mt-6 inline-flex gap-1 items-center text-sm font-semibold u-accent">
+                  Choose {{ plan.name }}
+                  <span class="size-4 i-hugeicons-arrow-right-01 transition-transform group-hover:translate-x-0.5" aria-hidden="true"></span>
+                </span>
+              </a>
+            @endforeach
+          </div>
+          <p class="mt-6 text-sm u-muted">Yearly saves {{ yearlySaving }}% over paying monthly. Checkout is handled by Stripe.</p>
         </div>
       </section>
 
@@ -371,11 +317,6 @@ const faqs = [
       </section>
     </main>
 
-    <footer class="border-t u-line">
-      <div class="flex flex-col gap-3 sm:flex-row sm:justify-between mx-auto px-4 py-10 sm:px-6 max-w-6xl text-sm u-muted">
-        <p>Uplink is built with <a href="https://stacksjs.com" class="underline underline-offset-4 hover:opacity-80">Stacks</a>. The source is <a href="https://github.com/stacksjs/uplink" class="underline underline-offset-4 hover:opacity-80">on GitHub</a>.</p>
-        <p>Earth photos: NASA, ISS Expedition 40.</p>
-      </div>
-    </footer>
+    @include('site-footer')
   </body>
 </html>

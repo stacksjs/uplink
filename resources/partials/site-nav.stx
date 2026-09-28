@@ -1,0 +1,26 @@
+<script server>
+// The download link comes from the release record, so every page's button
+// points at the same build. `path` is the including page's.
+import release from '../data/release.json'
+
+const navDownloadUrl = release.url
+</script>
+
+<header class="sticky top-0 border-b u-line u-nav" style="z-index: 20">
+  <nav class="flex items-center justify-between mx-auto px-4 sm:px-6 h-16 max-w-6xl" aria-label="Main">
+    <a href="/" class="flex gap-2 items-center font-semibold text-lg tracking-tight">
+      <span class="size-5 i-hugeicons-satellite-02 u-accent" aria-hidden="true"></span>
+      Uplink
+    </a>
+    <div class="flex gap-5 items-center text-sm sm:gap-6">
+      <a href="/#how" class="hidden sm:inline hover:opacity-80 u-muted">How it works</a>
+      @if(path === '/pricing')
+        <a href="/pricing" class="hover:opacity-80 u-muted" aria-current="page">Pricing</a>
+      @else
+        <a href="/pricing" class="hover:opacity-80 u-muted">Pricing</a>
+      @endif
+      <a href="/#questions" class="hidden md:inline hover:opacity-80 u-muted">Questions</a>
+      <a href="{{ navDownloadUrl }}" class="u-btn u-btn-primary" style="padding: .5rem 1rem"><span>Download<span class="hidden sm:inline"> for Mac</span></span></a>
+    </div>
+  </nav>
+</header>

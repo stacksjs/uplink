@@ -223,4 +223,14 @@ jobs:
             [ "$(status "$path")" = 404 ] || { echo "::error::/$path answers $(status "$path") - framework default views are being served."; exit 1; }
           done
           [ "$(status images/california-night-960.jpg)" = 200 ] || { echo "::error::The hero image is not being served."; exit 1; }
-          echo "Home page, 404s and assets check out."
+          # Pricing renders, and a plan's checkout hands over to Stripe: a 303
+          # to checkout.stripe.com proves the Stripe key decrypted, the prices
+          # exist and the SDK is installed. It creates one unpaid session, which
+          # Stripe expires by itself.
+          [ "$(status pricing)" = 200 ] || { echo "::error::/pricing answers $(status pricing)."; exit 1; }
+          to=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 30 "${url}checkout/monthly")
+          case "$to" in
+            "303 https://checkout.stripe.com/"*) ;;
+            *) echo "::error::/checkout/monthly answered '${to%% *}', not a 303 to Stripe Checkout."; exit 1 ;;
+          esac
+          echo "Home page, pricing, checkout, 404s and assets check out."
