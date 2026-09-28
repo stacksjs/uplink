@@ -392,19 +392,28 @@ export class Uplink {
       await this.begin(state, next)
   }
 
+  /**
+   * Answers a control word. `reply` reports whether it delivered, which
+   * `finish` acts on for a real answer; a control reply is said and forgotten,
+   * so the result is deliberately dropped here.
+   */
   private async control(command: ControlCommand, target: ReplyTarget): Promise<void> {
     const state = this.chat(target.chatGuid)
 
     switch (command) {
       case 'help':
-        return this.reply(target, HELP_TEXT)
+        await this.reply(target, HELP_TEXT)
+        return
 
       case 'ping':
-        return this.reply(target, `pong (up ${formatDuration(this.now() - this.startedAt)})`)
+        await this.reply(target, `pong (up ${formatDuration(this.now() - this.startedAt)})`)
+        return
 
       case 'status': {
-        if (!state.active)
-          return this.reply(target, 'Idle. Text me a question or a task.')
+        if (!state.active) {
+          await this.reply(target, 'Idle. Text me a question or a task.')
+          return
+        }
         const active = state.active
         const lines = [
           `Working ${formatDuration(this.now() - active.startedAt)} on: ${truncate(active.prompt, 80)}`,
@@ -412,32 +421,39 @@ export class Uplink {
         ]
         if (state.queue.length > 0)
           lines.push(`${state.queue.length} queued.`)
-        return this.reply(target, lines.join('\n'))
+        await this.reply(target, lines.join('\n'))
+        return
       }
 
       case 'stop': {
         const queued = state.queue.splice(0)
         for (const job of queued)
           await this.deps.store.updateRun(job.runId, { status: 'stopped', finishedAt: this.now() })
-        if (!state.active)
-          return this.reply(target, queued.length > 0 ? `Cleared ${queued.length} queued.` : 'Nothing running.')
+        if (!state.active) {
+          await this.reply(target, queued.length > 0 ? `Cleared ${queued.length} queued.` : 'Nothing running.')
+          return
+        }
         state.active.stoppedByUser = true
         state.active.run.cancel()
         const extra = queued.length > 0 ? ` and cleared ${queued.length} queued` : ''
-        return this.reply(target, `Stopped: ${truncate(state.active.prompt, 60)}${extra}.`)
+        await this.reply(target, `Stopped: ${truncate(state.active.prompt, 60)}${extra}.`)
+        return
       }
 
       case 'new': {
         const conversation = await this.conversation(target)
         await this.deps.store.saveConversation({ ...conversation, sessionId: null, cwd: null, moreText: null })
-        return this.reply(target, 'Fresh start. Your next text begins a new conversation.')
+        await this.reply(target, 'Fresh start. Your next text begins a new conversation.')
+        return
       }
 
       case 'more': {
         const conversation = await this.conversation(target)
-        if (!conversation.moreText)
-          return this.reply(target, 'Nothing more to send.')
-        return this.reply(target, conversation.moreText, { keepRest: true })
+        if (!conversation.moreText) {
+          await this.reply(target, 'Nothing more to send.')
+          return
+        }
+        await this.reply(target, conversation.moreText, { keepRest: true })
       }
     }
   }
