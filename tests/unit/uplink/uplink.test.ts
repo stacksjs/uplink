@@ -150,6 +150,30 @@ describe('Uplink', () => {
     expect(h.sender.texts()).toHaveLength(3) // No "That failed: Stopped." after a stop.
   })
 
+  it('stops everything from the Mac and tells the thread', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'refactor the router', fromMe: true })
+    h.fake.add({ chat: ME, text: 'then run the tests', fromMe: true })
+    await h.uplink.tick()
+    expect(h.uplink.activeRuns).toHaveLength(1)
+
+    expect(await h.uplink.stopAll()).toBe(1)
+    await settle()
+    expect(h.engine.runs[0].cancelled).toBe(true)
+    expect(h.uplink.activeRuns).toHaveLength(0)
+    expect(h.sender.texts().at(-1)).toContain('Stopped on the Mac: refactor the router and cleared 1 queued.')
+    expect([...h.store.runs.values()].map(r => r.status)).toEqual(['stopped', 'stopped'])
+    expect(await h.uplink.stopAll()).toBe(0)
+  })
+
+  it('does not double the punctuation of a question it stopped', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'Whats the NFL score rn?', fromMe: true })
+    await h.uplink.tick()
+    await h.uplink.stopAll()
+    expect(h.sender.texts().at(-1)).toBe('🛰 Stopped on the Mac: Whats the NFL score rn?')
+  })
+
   it('runs the queue in order once the current task finishes', async () => {
     const h = await harness()
     h.fake.add({ chat: ME, text: 'first', fromMe: true })

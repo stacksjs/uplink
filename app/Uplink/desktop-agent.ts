@@ -147,6 +147,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   let messages: MessagesDb | null = null
   let messagesError: string | null = null
   let uplink: Uplink | null = null
+  let knownAllowed: string[] = []
   const engines = new Map<string, EngineState>()
   let checkingEngines = false
 
@@ -217,7 +218,11 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       lastActivity: run.lastActivity ?? 'Thinking',
       queued: run.queued,
     })) ?? []
-    const allowed = uplink?.allowedHandles ?? settings.allowed
+    // While paused there is no watcher to ask, and "Nobody yet" would be wrong:
+    // the handles it last found still apply when it resumes.
+    if (uplink)
+      knownAllowed = uplink.allowedHandles
+    const allowed = uplink ? knownAllowed : settings.allowed.length > 0 ? settings.allowed : knownAllowed
     const checks = [
       {
         id: 'fda',
@@ -345,6 +350,9 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           await checkEngines()
           return json(status())
         }
+
+        case '/api/stop':
+          return json({ stopped: await uplink?.stopAll() ?? 0, ...status() })
 
         case '/api/quit':
           setTimeout(() => process.kill(process.pid, 'SIGTERM'), 50)
