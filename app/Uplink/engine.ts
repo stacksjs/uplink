@@ -1,4 +1,5 @@
 import type { Subprocess } from 'bun'
+import { tmpdir } from 'node:os'
 import process from 'node:process'
 import { truncate } from './format'
 
@@ -43,8 +44,37 @@ export interface EngineRun {
   cancel: () => void
 }
 
+/** Which agent CLI answers a text. */
+export type EngineId = 'claude' | 'codex'
+
+export const ENGINE_IDS: readonly EngineId[] = ['claude', 'codex']
+
+export function isEngineId(value: string): value is EngineId {
+  return (ENGINE_IDS as readonly string[]).includes(value)
+}
+
+/** Whether a CLI can answer right now, for the doctor and the menubar. */
+export interface EngineProbe {
+  ok: boolean
+  detail: string
+}
+
 export interface Engine {
+  readonly id: EngineId
+  /** How the engine is named to a person: "Claude Code", "Codex". */
+  readonly label: string
+  /**
+   * What to text back when a run failed on authentication. The person is away
+   * from the Mac, so this has to name the CLI and the exact command.
+   */
+  readonly authFailureHint: string
   run: (request: EngineRequest) => EngineRun
+  /**
+   * Can this CLI answer right now. Separate from `run` because setup has to
+   * answer it before any text arrives, and because the two CLIs disagree on
+   * what proof of life costs: Claude spends a turn, Codex does not.
+   */
+  probe: () => Promise<EngineProbe>
 }
 
 export interface ClaudeEngineOptions {
@@ -58,8 +88,58 @@ export interface ClaudeEngineOptions {
 
 const AUTH_FAILURE = /failed to authenticate|oauth|invalid api key|please run \/login|not logged in|credit balance/i
 
+/** A probe that hangs is worse than one that fails: setup shows "Checking" for ever. */
+export const PROBE_TIMEOUT_MS = 60_000
+
 export class ClaudeEngine implements Engine {
+  readonly id = 'claude' as const
+  readonly label = 'Claude Code'
+  readonly authFailureHint = 'run "claude setup-token" on the Mac and give Uplink the token'
+
   constructor(private readonly options: ClaudeEngineOptions) {}
+
+  /**
+   * One real turn, on the cheapest model. Only asking "is a token set" passed a
+   * token truncated at the terminal's 80-column wrap: set, well-formed, and
+   * rejected with a 401 on first use.
+   */
+  async probe(): Promise<EngineProbe> {
+    try {
+      const proc = Bun.spawn([this.options.bin, '-p', 'Reply with exactly: ok', '--model', 'haiku', '--output-format', 'json'], {
+        cwd: tmpdir(),
+        env: this.env(),
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const timer = setTimeout(() => proc.kill(), PROBE_TIMEOUT_MS)
+      const text = await new Response(proc.stdout).text()
+      clearTimeout(timer)
+      await proc.exited
+      const result = JSON.parse(text) as { is_error?: boolean, result?: string }
+      if (result.is_error) {
+        const said = truncate(result.result ?? 'Claude did not answer', 140)
+        return { ok: false, detail: AUTH_FAILURE.test(said) ? 'Not signed in yet.' : said }
+      }
+      return { ok: true, detail: this.env().CLAUDE_CODE_OAUTH_TOKEN ? 'Signed in with your token' : 'Signed in through the Claude CLI' }
+    }
+    catch {
+      return { ok: false, detail: `Could not run ${this.options.bin}. Is Claude Code installed?` }
+    }
+  }
+
+  /**
+   * A .env copied from .env.example carries `CLAUDE_CODE_OAUTH_TOKEN=`; an
+   * empty token must not stand in for the CLI's own login. The probe needs the
+   * same treatment as a run, or a fresh install reports a failure a real run
+   * would not have.
+   */
+  private env(): Record<string, string | undefined> {
+    const env: Record<string, string | undefined> = { ...process.env, ...this.options.env }
+    if (!env.CLAUDE_CODE_OAUTH_TOKEN)
+      delete env.CLAUDE_CODE_OAUTH_TOKEN
+    return env
+  }
 
   args(request: EngineRequest): string[] {
     const args = [
@@ -85,11 +165,7 @@ export class ClaudeEngine implements Engine {
     let cancelled = false
     let timedOut = false
 
-    const env: Record<string, string | undefined> = { ...process.env, ...this.options.env }
-    // A .env copied from .env.example carries `CLAUDE_CODE_OAUTH_TOKEN=`; an
-    // empty token must not stand in for the CLI's own login.
-    if (!env.CLAUDE_CODE_OAUTH_TOKEN)
-      delete env.CLAUDE_CODE_OAUTH_TOKEN
+    const env = this.env()
 
     const proc: Subprocess<'ignore', 'pipe', 'pipe'> = Bun.spawn([this.options.bin, ...this.args(request)], {
       cwd: request.cwd,

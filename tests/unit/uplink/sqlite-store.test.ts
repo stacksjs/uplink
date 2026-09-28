@@ -75,8 +75,18 @@ describe('settings', () => {
   })
 
   it('feeds loadConfig without any .env', () => {
-    const config = loadConfig(settingsEnv({ allowed: ['(555) 000-1111'], model: 'opus', workdir: '/tmp', openAtLogin: true, paused: false }, {}))
-    expect(config).toMatchObject({ allowed: ['+15550001111'], model: 'opus', workdir: '/tmp' })
+    const config = loadConfig(settingsEnv({ allowed: ['(555) 000-1111'], engine: 'claude', model: 'opus', workdir: '/tmp', openAtLogin: true, paused: false }, {}))
+    expect(config).toMatchObject({ allowed: ['+15550001111'], engine: 'claude', claudeModel: 'opus', workdir: '/tmp' })
+  })
+
+  it('carries the selected engine through to config', () => {
+    const settings = { allowed: [], engine: 'codex' as const, model: null, workdir: '/tmp', openAtLogin: true, paused: false }
+    expect(loadConfig(settingsEnv(settings, {})).engine).toBe('codex')
+    // A settings.json naming an engine this build does not have must not stop
+    // the app from starting.
+    const path = join(tempDir(), 'settings.json')
+    writeSettings({ ...settings, engine: 'gemini' as never }, path)
+    expect(readSettings(path).engine).toBe('claude')
   })
 
   it('cleans a token pasted across a line wrap', () => {
