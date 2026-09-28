@@ -416,7 +416,7 @@
       $('#headline').textContent = HEADLINES[status.state] || status.state
       const firstTodo = renderSteps(status, byId)
       $('#subline').textContent = setup
-        ? `Step ${firstTodo + 1} of 3`
+        ? `Step ${firstTodo + 1} of ${document.querySelectorAll(".steps > .step").length}`
         : status.state === 'working' && status.active[0]
           ? status.active[0].lastActivity
           : status.state === 'paused'
