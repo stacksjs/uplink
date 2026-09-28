@@ -87,7 +87,7 @@ const statusStyles = {
       <section class="grid gap-10 lg:grid-cols-5 mt-10" aria-label="Setup and usage">
         <div class="lg:col-span-3">
           <h2 class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">
-            Setup @if(failing.length > 0)<span class="normal-case text-amber-600 tracking-normal dark:text-amber-400">, {{ failing.length }} to do</span>@endif
+            Setup @if(failing.length > 0)<span class="normal-case text-amber-600 tracking-normal dark:text-amber-400">({{ failing.length }} to do)</span>@endif
           </h2>
           <ul class="mt-4 bg-white dark:bg-neutral-900 border border-neutral-200 divide-neutral-200 divide-y rounded-lg dark:border-neutral-800 dark:divide-neutral-800">
             @foreach(data.checks as check)
