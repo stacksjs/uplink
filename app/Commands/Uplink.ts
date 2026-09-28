@@ -1,9 +1,11 @@
 import { copyFileSync, existsSync, watch } from 'node:fs'
 import process from 'node:process'
 import { defineCommand } from '@stacksjs/cli'
-import { loadConfig, systemPrompt } from '../Uplink/config'
-import { runChecks, writeHeartbeat } from '../Uplink/doctor'
-import { ClaudeEngine } from '../Uplink/engine'
+import type { EngineId } from '../Uplink/engine'
+import { loadConfig } from '../Uplink/config'
+import { checksPass, runChecks, writeHeartbeat } from '../Uplink/doctor'
+import { ENGINE_IDS, isEngineId } from '../Uplink/engine'
+import { engineFor, selectedEngine } from '../Uplink/engines'
 import { formatDuration, toPlainText } from '../Uplink/format'
 import { MessagesAccessError, MessagesDb } from '../Uplink/messages-db'
 import { ModelStore } from '../Uplink/model-store'
@@ -17,16 +19,6 @@ import { detectWorkdir } from '../Uplink/workdir'
 
 const HEARTBEAT_MS = 15_000
 const RETRY_OPEN_MS = 30_000
-
-function engineFor(config: ReturnType<typeof loadConfig>): ClaudeEngine {
-  return new ClaudeEngine({
-    bin: config.claudeBin,
-    model: config.model,
-    permissionMode: config.permissionMode,
-    systemPrompt: systemPrompt(config),
-    timeoutMs: config.timeoutMs,
-  })
-}
 
 async function openMessages(config: ReturnType<typeof loadConfig>, appDir: string, startedAt: number): Promise<MessagesDb> {
   // Without Full Disk Access this fails. Under launchd, exiting would only
@@ -85,7 +77,7 @@ export default defineCommand((cli) => {
         config,
         messages,
         sender: new AppleScriptSender(),
-        engine: engineFor(config),
+        engine: selectedEngine(config),
         store: new ModelStore(`${appDir}/storage/uplink/cursor`),
       })
       await uplink.start()
@@ -134,11 +126,19 @@ export default defineCommand((cli) => {
   cli
     .command('uplink:ask <prompt>', 'Run one prompt through the agent exactly as a text would, and print the reply')
     .option('--cwd <dir>', 'Working directory (default: detected from the prompt)')
-    .action(async (prompt: string, options: { cwd?: string }) => {
+    .option('--engine <name>', 'claude or codex (default: UPLINK_ENGINE)')
+    .action(async (prompt: string, options: { cwd?: string, engine?: string }) => {
       const config = loadConfig()
       const cwd = options.cwd ?? detectWorkdir(prompt, config.workdir)
-      console.log(`[uplink] running in ${cwd}`)
-      const run = engineFor(config).run({
+      // Naming an engine here is how the other one gets tried without editing
+      // .env, which is the whole point of this command.
+      if (options.engine && !isEngineId(options.engine)) {
+        console.error(`[uplink] unknown engine "${options.engine}". Use ${ENGINE_IDS.join(' or ')}.`)
+        process.exit(1)
+      }
+      const engine = options.engine ? engineFor(options.engine as EngineId, config) : selectedEngine(config)
+      console.log(`[uplink] running in ${cwd} on ${engine.label}`)
+      const run = engine.run({
         prompt,
         cwd,
         onEvent: (event) => {
@@ -161,7 +161,7 @@ export default defineCommand((cli) => {
         if (!check.ok && check.fix)
           console.log(`    → ${check.fix}`)
       }
-      process.exit(checks.every(c => c.ok) ? 0 : 1)
+      process.exit(checksPass(checks) ? 0 : 1)
     })
 
   cli

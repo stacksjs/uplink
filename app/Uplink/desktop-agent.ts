@@ -2,11 +2,12 @@
 import type { Server } from 'bun'
 import type { UplinkConfig } from './config'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
-import { loadConfig, systemPrompt } from './config'
-import { ClaudeEngine } from './engine'
+import { loadConfig } from './config'
+import { isEngineId } from './engine'
+import { allEngines, selectedEngine } from './engines'
 import { formatDuration, truncate } from './format'
 import { MessagesAccessError, MessagesDb } from './messages-db'
 import { AppleScriptSender } from './sender'
@@ -40,7 +41,7 @@ const LOCK_PATH = join(DATA_DIR, 'uplink.pid')
 const LAUNCH_AGENT = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
 const RETRY_OPEN_MS = 5_000
 
-type ClaudeState = { ok: boolean, detail: string, checkedAt: number } | null
+type EngineState = { ok: boolean, detail: string, checkedAt: number }
 
 export interface DesktopAgent {
   port: number
@@ -124,29 +125,6 @@ export function setOpenAtLogin(enabled: boolean): void {
 `)
 }
 
-async function probeClaude(bin: string, token: string | null): Promise<ClaudeState> {
-  const env: Record<string, string | undefined> = { ...process.env }
-  if (token)
-    env.CLAUDE_CODE_OAUTH_TOKEN = token
-  else
-    delete env.CLAUDE_CODE_OAUTH_TOKEN
-  try {
-    const proc = Bun.spawn([bin, '-p', 'Reply with exactly: ok', '--model', 'haiku', '--output-format', 'json'], { cwd: tmpdir(), env, stdout: 'pipe', stderr: 'pipe' })
-    const timer = setTimeout(() => proc.kill(), 60_000)
-    const text = await new Response(proc.stdout).text()
-    clearTimeout(timer)
-    await proc.exited
-    const result = JSON.parse(text) as { is_error?: boolean, result?: string }
-    if (result.is_error && !token && /authenticate|oauth|log ?in/i.test(result.result ?? ''))
-      return { ok: false, detail: 'Not signed in yet.', checkedAt: Date.now() }
-    return result.is_error
-      ? { ok: false, detail: truncate(result.result ?? 'Claude did not answer', 140), checkedAt: Date.now() }
-      : { ok: true, detail: token ? 'Signed in with your token' : 'Signed in through the Claude CLI', checkedAt: Date.now() }
-  }
-  catch {
-    return { ok: false, detail: `Could not run ${bin}. Is Claude Code installed?`, checkedAt: Date.now() }
-  }
-}
 
 export async function startDesktopAgent(options: { version: string }): Promise<DesktopAgent> {
   mkdirSync(DATA_DIR, { recursive: true })
@@ -169,23 +147,25 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   let messages: MessagesDb | null = null
   let messagesError: string | null = null
   let uplink: Uplink | null = null
-  let claude: ClaudeState = null
-  let checkingClaude = false
+  const engines = new Map<string, EngineState>()
+  let checkingEngines = false
 
-  const engine = (): ClaudeEngine => new ClaudeEngine({
-    bin: config.claudeBin,
-    model: config.model,
-    permissionMode: config.permissionMode,
-    systemPrompt: systemPrompt(config),
-    timeoutMs: config.timeoutMs,
-  })
-
-  const checkClaude = async (): Promise<void> => {
-    if (checkingClaude)
+  /**
+   * Probe every engine, not only the selected one: the popover shows the other
+   * as available rather than as a failure, which is how a person discovers they
+   * can switch.
+   */
+  const checkEngines = async (): Promise<void> => {
+    if (checkingEngines)
       return
-    checkingClaude = true
-    claude = await probeClaude(config.claudeBin, token)
-    checkingClaude = false
+    checkingEngines = true
+    try {
+      for (const engine of allEngines(config))
+        engines.set(engine.id, { ...await engine.probe(), checkedAt: Date.now() })
+    }
+    finally {
+      checkingEngines = false
+    }
   }
 
   const startWatching = async (): Promise<void> => {
@@ -199,7 +179,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       messagesError = error instanceof MessagesAccessError ? 'Uplink needs Full Disk Access to read Messages.' : String(error)
       return
     }
-    uplink = new Uplink({ config, messages, sender: new AppleScriptSender(), engine: engine(), store })
+    uplink = new Uplink({ config, messages, sender: new AppleScriptSender(), engine: selectedEngine(config), store })
     await uplink.start()
   }
 
@@ -222,7 +202,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   }, 15_000)
 
   await startWatching()
-  void checkClaude()
+  void checkEngines()
 
   const status = () => {
     const recent = store.recentRuns(8).map(run => ({
@@ -245,12 +225,21 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         ok: messages !== null,
         detail: messages ? 'Full Disk Access granted' : (messagesError ?? 'Waiting for Full Disk Access'),
       },
-      {
-        id: 'claude',
-        name: 'Sign in to Claude',
-        ok: claude?.ok ?? false,
-        detail: checkingClaude ? 'Checking' : (claude?.detail ?? 'Not checked yet'),
-      },
+      ...allEngines(config).map((engine) => {
+        const state = engines.get(engine.id)
+        const selected = engine.id === config.engine
+        return {
+          // `engine` is the selected one, and the popover draws its sign-in
+          // step. The other is listed so switching is discoverable.
+          id: selected ? 'engine' : `engine:${engine.id}`,
+          name: selected ? `Sign in to ${engine.label}` : engine.label,
+          engineId: engine.id,
+          label: engine.label,
+          ok: state?.ok ?? false,
+          detail: checkingEngines && !state ? 'Checking' : (state?.detail ?? 'Not checked yet'),
+          informational: !selected,
+        }
+      }),
       {
         id: 'handles',
         name: 'Who can text it',
@@ -258,7 +247,8 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         detail: allowed.length > 0 ? allowed.join(', ') : 'No handles yet. Sign in to Messages, or add your number.',
       },
     ]
-    const ready = checks.every(check => check.ok)
+    // An engine the person has not selected must not hold the app in setup.
+    const ready = checks.every(check => check.ok || check.informational)
     const state = settings.paused ? 'paused' : !ready ? 'setup' : active.length > 0 ? 'working' : 'listening'
     return {
       state,
@@ -267,9 +257,16 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       checks,
       active,
       recent,
-      settings: { allowed: settings.allowed, openAtLogin: settings.openAtLogin, paused: settings.paused, model: settings.model },
+      settings: { allowed: settings.allowed, engine: settings.engine, openAtLogin: settings.openAtLogin, paused: settings.paused, model: settings.model },
+      engines: allEngines(config).map(engine => ({ id: engine.id, label: engine.label })),
       lastError: uplink?.lastError ?? null,
     }
+  }
+
+  /** The selected engine's probe, which is what a sign-in button wants back. */
+  const engineResult = (): { ok: boolean, detail: string } => {
+    const state = engines.get(config.engine)
+    return { ok: state?.ok ?? false, detail: state?.detail ?? 'Not checked yet' }
   }
 
   const json = (body: unknown, status = 200): Response => Response.json(body, { status, headers: { 'cache-control': 'no-store' } })
@@ -301,10 +298,12 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'])
           return json({ ok: true })
 
-        case '/api/open/terminal':
-          // `claude setup-token` needs a real terminal for its browser sign-in.
-          Bun.spawnSync(['osascript', '-e', 'tell application "Terminal" to do script "claude setup-token"', '-e', 'tell application "Terminal" to activate'])
-          return json({ ok: true })
+        case '/api/open/terminal': {
+          // Both sign-ins need a real terminal for their browser round trip.
+          const command = config.engine === 'codex' ? 'codex login' : 'claude setup-token'
+          Bun.spawnSync(['osascript', '-e', `tell application "Terminal" to do script "${command}"`, '-e', 'tell application "Terminal" to activate'])
+          return json({ ok: true, command })
+        }
 
         case '/api/token': {
           const cleaned = cleanToken(String(body.token ?? ''))
@@ -313,17 +312,22 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           writeToken(cleaned)
           token = cleaned
           process.env.CLAUDE_CODE_OAUTH_TOKEN = cleaned
-          await checkClaude()
-          return json({ ok: claude?.ok ?? false, detail: claude?.detail })
+          await checkEngines()
+          return json(engineResult())
         }
 
+        // `/api/claude/test` is the old name for this and still answers, because
+        // a popover cached from an older build would otherwise have a dead button.
         case '/api/claude/test':
-          await checkClaude()
-          return json({ ok: claude?.ok ?? false, detail: claude?.detail })
+        case '/api/engine/test':
+          await checkEngines()
+          return json(engineResult())
 
         case '/api/settings': {
           if (Array.isArray(body.allowed))
             settings.allowed = body.allowed.map(String).map((s: string) => s.trim()).filter(Boolean)
+          if (typeof body.engine === 'string' && isEngineId(body.engine))
+            settings.engine = body.engine
           if (typeof body.paused === 'boolean')
             settings.paused = body.paused
           if (typeof body.openAtLogin === 'boolean') {
@@ -334,6 +338,9 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           settings = readSettings()
           config = loadConfig(settingsEnv(settings))
           await restartWatching()
+          // A switched engine has not been probed under the new selection yet,
+          // and the popover reads the answer straight back.
+          await checkEngines()
           return json(status())
         }
 

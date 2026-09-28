@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import process from 'node:process'
 import Run from '../Models/Run'
 import { loadConfig } from './config'
-import { readHeartbeat, runChecks } from './doctor'
+import { checksPass, readHeartbeat, runChecks } from './doctor'
 import { formatDuration, truncate } from './format'
 
 /**
@@ -62,7 +62,7 @@ export async function loadDashboard(appDir: string = process.cwd()): Promise<Das
   ])
 
   const live = isLive(heartbeat)
-  const ready = checks.every(check => check.ok)
+  const ready = checksPass(checks)
   const runs = rows.map((row): RunRow => ({
     id: row.id,
     prompt: truncate(row.prompt ?? '', 140),
