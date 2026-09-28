@@ -113,7 +113,7 @@
       appearance: none; -webkit-appearance: none; background: none; border: 0; padding: 0;
       color: var(--link); font-size: 12px;
     }
-    button:disabled { opacity: .5; }
+    button:disabled, button[data-busy] { opacity: .5; }
     /* A ring only when the keyboard put focus there, as in AppKit. */
     :focus:not(:focus-visible) { outline: none; }
     .buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
@@ -219,21 +219,31 @@
             <!-- Each CLI signs in its own way, so only the selected one's
                  instructions are shown. -->
             <div data-engine-only="claude">
-              <p>Run <code>claude setup-token</code> in Terminal, sign in, and paste the token it prints. Uplink keeps it in your Keychain.</p>
-              <div class="buttons"><button data-action="open-terminal">Open Terminal</button></div>
-              <textarea id="token" rows="2" placeholder="sk-ant-oat01-..." spellcheck="false" autocomplete="off" aria-label="Claude token"></textarea>
-              <p class="error" id="token-error" hidden></p>
-              <div class="buttons end">
-                <button data-action="test-engine">Check Again</button>
-                <button class="default" data-action="save-token">Save Token</button>
+              <p>Sign in with your Claude account in the browser. Uplink keeps the token in your Keychain.</p>
+              <div class="buttons">
+                <button class="default" data-action="sign-in" data-sign-in>Sign In with Claude</button>
+                <button class="link" data-action="cancel-sign-in" data-sign-in-cancel hidden>Cancel</button>
+                <span class="grow"></span>
+                <button class="link" data-action="toggle-paste" id="toggle-paste">Paste a token instead</button>
+              </div>
+              <div id="paste" hidden>
+                <p class="note">Run <code>claude setup-token</code> in Terminal and paste the token it prints.</p>
+                <textarea id="token" rows="2" placeholder="sk-ant-oat01-..." spellcheck="false" autocomplete="off" aria-label="Claude token"></textarea>
+                <p class="error" id="token-error" hidden></p>
+                <div class="buttons">
+                  <button data-action="open-terminal">Open Terminal</button>
+                  <span class="grow"></span>
+                  <button data-action="save-token">Save Token</button>
+                </div>
               </div>
             </div>
             <div data-engine-only="codex">
-              <p>Run <code>codex login</code> in Terminal and sign in. Codex keeps the credential itself, so there is nothing to paste here.</p>
+              <p>Sign in with your ChatGPT account in the browser. Codex keeps the credential itself.</p>
               <div class="buttons">
-                <button data-action="open-terminal">Open Terminal</button>
+                <button class="default" data-action="sign-in" data-sign-in>Sign In with ChatGPT</button>
+                <button class="link" data-action="cancel-sign-in" data-sign-in-cancel hidden>Cancel</button>
                 <span class="grow"></span>
-                <button class="default" data-action="test-engine">Check Again</button>
+                <button class="link" data-action="test-engine">Check Again</button>
               </div>
             </div>
           </div>
@@ -382,6 +392,16 @@
         $('[data-missing-label]').textContent = check?.label || selected
         $('#install-command').value = check?.install?.command || ''
       }
+
+      // One sign-in at a time: while the browser is open, the button says so.
+      const waiting = status.signIn?.phase === 'waiting'
+      for (const button of document.querySelectorAll('[data-sign-in]')) {
+        button.dataset.label ??= button.textContent
+        button.textContent = waiting ? 'Waiting for the browser' : button.dataset.label
+        button.toggleAttribute('data-busy', waiting)
+      }
+      for (const cancel of document.querySelectorAll('[data-sign-in-cancel]'))
+        cancel.hidden = !waiting
 
       for (const node of document.querySelectorAll('[data-engine-only]'))
         node.hidden = missing || node.dataset.engineOnly !== selected
@@ -585,6 +605,14 @@
         await refresh()
       },
       'open-automation': () => api('/api/open/automation', {}),
+      'sign-in': async () => render(await api('/api/engine/sign-in', {})),
+      'cancel-sign-in': async () => render(await api('/api/engine/sign-in/cancel', {})),
+      'toggle-paste': () => {
+        $('#paste').hidden = !$('#paste').hidden
+        $('#toggle-paste').textContent = $('#paste').hidden ? 'Paste a token instead' : 'Hide'
+        if (!$('#paste').hidden)
+          $('#token').focus()
+      },
       'save-token': async () => {
         const error = $('#token-error')
         error.hidden = true
@@ -621,7 +649,7 @@
 
     document.addEventListener('click', (event) => {
       const button = event.target.closest('[data-action]')
-      if (!button || button.disabled)
+      if (!button || button.disabled || button.hasAttribute('data-busy'))
         return
       button.disabled = true
       Promise.resolve(actions[button.dataset.action]?.()).finally(() => { button.disabled = false })

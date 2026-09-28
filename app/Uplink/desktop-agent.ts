@@ -14,6 +14,7 @@ import { formatDuration, truncate } from './format'
 import { MessagesAccessError, MessagesDb } from './messages-db'
 import { AppleScriptSender } from './sender'
 import { cleanToken, DATA_DIR, DATABASE_PATH, readSettings, readToken, settingsEnv, tokenLooksValid, writeSettings, writeToken } from './settings'
+import { SignIn } from './sign-in'
 import { SqliteStore } from './sqlite-store'
 import { Uplink } from './uplink'
 
@@ -172,6 +173,11 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   const engines = new Map<string, EngineState>()
   let checkingEngines = false
   let automation: AutomationState | null = null
+  let checkingAutomation = false
+  const signIn = new SignIn()
+  // What setup has already done for the person this launch, so it happens
+  // once rather than every few seconds.
+  const setupDone = { openedFullDiskAccess: false, startedSignIn: false }
 
   /**
    * Whether macOS will let this app drive Messages. This process is Uplink.app,
@@ -180,7 +186,15 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
    * than leaving it to the first real reply.
    */
   const checkAutomation = async (): Promise<void> => {
-    automation = await sender.canSend()
+    if (checkingAutomation)
+      return
+    checkingAutomation = true
+    try {
+      automation = await sender.canSend()
+    }
+    finally {
+      checkingAutomation = false
+    }
   }
 
   /**
@@ -199,6 +213,61 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     finally {
       checkingEngines = false
     }
+  }
+
+  /**
+   * Sign the selected engine in by running its own CLI: the browser opens, the
+   * person approves, and for Claude the token it prints goes straight into the
+   * Keychain. No terminal, nothing to copy.
+   */
+  const startSignIn = (): void => {
+    if (config.engine === 'codex') {
+      signIn.start({ command: [config.codexBin, 'login'], onDone: checkEngines })
+      return
+    }
+    signIn.start({
+      command: [config.claudeBin, 'setup-token'],
+      // A stale token in the environment is what is being replaced.
+      env: { CLAUDE_CODE_OAUTH_TOKEN: undefined },
+      onToken: async (captured) => {
+        const cleaned = cleanToken(captured)
+        if (!tokenLooksValid(cleaned))
+          throw new Error('Claude printed something that is not a token.')
+        writeToken(cleaned)
+        token = cleaned
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = cleaned
+        await checkEngines()
+      },
+    })
+  }
+
+  /**
+   * Setup that moves itself along, one macOS prompt at a time, so the person
+   * only has to say yes: Full Disk Access (System Settings opens at the right
+   * list), then signing in (the browser opens), then the prompt to let Uplink
+   * control Messages. Each is started once per launch; a step already done is
+   * skipped, and nothing here repeats a question someone declined.
+   */
+  const advanceSetup = (): void => {
+    if (settings.paused)
+      return
+    if (!messages) {
+      if (!setupDone.openedFullDiskAccess) {
+        setupDone.openedFullDiskAccess = true
+        Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'])
+      }
+      return
+    }
+    const engine = engines.get(config.engine)
+    if (engine?.reason === 'signed-out' && !setupDone.startedSignIn) {
+      setupDone.startedSignIn = true
+      startSignIn()
+      return
+    }
+    // After signing in, so the Messages prompt does not land on top of the
+    // browser tab someone is reading.
+    if (!signIn.running && automation === null)
+      void checkAutomation()
   }
 
   const startWatching = async (): Promise<void> => {
@@ -223,10 +292,13 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   }
 
   // Until Full Disk Access is granted, try again every few seconds: the
-  // grant should take effect without the person having to relaunch.
+  // grant should take effect without the person having to relaunch. Then take
+  // setup on to its next step.
   const retry = setInterval(() => {
     if (!uplink && !settings.paused)
-      void startWatching()
+      void startWatching().then(advanceSetup)
+    else
+      advanceSetup()
   }, RETRY_OPEN_MS)
 
   const keepMessagesOpen = setInterval(() => {
@@ -235,13 +307,13 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     // Re-ask while the answer is anything but yes. A refusal only changes in
     // System Settings, and a timeout from a Messages that was still starting
     // should not leave the app stuck in setup for ever.
-    if (!automation?.ok)
+    if (messages && automation && !automation.ok)
       void checkAutomation()
   }, 15_000)
 
   await startWatching()
-  void checkEngines()
-  void checkAutomation()
+  void checkEngines().then(advanceSetup)
+  advanceSetup()
 
   const status = () => {
     const recent = store.recentRuns(8).map(run => ({
@@ -286,7 +358,11 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           reason,
           install: engine.install,
           ok: state?.ok ?? false,
-          detail: checkingEngines && !state ? 'Checking' : (state?.detail ?? 'Not checked yet'),
+          detail: selected && signIn.state.phase === 'waiting'
+            ? signIn.state.detail
+            : selected && signIn.state.phase === 'failed' && !state?.ok
+              ? signIn.state.detail
+              : checkingEngines && !state ? 'Checking' : (state?.detail ?? 'Not checked yet'),
           informational: !selected,
         }
       }),
@@ -304,7 +380,10 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         id: 'automation',
         name: 'Send replies',
         ok: automation?.ok ?? false,
-        detail: uplink?.lastSendError ?? automation?.detail ?? 'Not checked yet',
+        detail: uplink?.lastSendError
+          ?? (checkingAutomation && !automation?.ok
+            ? 'Click OK in the macOS prompt to let Uplink use Messages.'
+            : automation?.detail ?? 'Uplink asks for this once the steps above are done.'),
         informational: false,
       },
     ]
@@ -321,6 +400,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       settings: { allowed: settings.allowed, engine: settings.engine, openAtLogin: settings.openAtLogin, paused: settings.paused, model: settings.model },
       engines: allEngines(config).map(engine => ({ id: engine.id, label: engine.label })),
       lastError: uplink?.lastError ?? null,
+      signIn: signIn.state,
     }
   }
 
@@ -376,6 +456,14 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
             Bun.spawnSync(['open', url])
           return json({ ok: Boolean(url), url })
         }
+
+        case '/api/engine/sign-in':
+          startSignIn()
+          return json(status())
+
+        case '/api/engine/sign-in/cancel':
+          signIn.cancel()
+          return json(status())
 
         case '/api/open/terminal': {
           // Both sign-ins need a real terminal for their browser round trip.
@@ -440,6 +528,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     server,
     stop: async () => {
       clearInterval(retry)
+      signIn.cancel()
       clearInterval(keepMessagesOpen)
       await uplink?.stop()
       server.stop(true)
