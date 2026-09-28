@@ -1,0 +1,172 @@
+<script server>
+/**
+ * Uplink's dashboard: is it listening, what does setup still need, and what
+ * has it done. Server-rendered and refreshed by the browser every 15 seconds,
+ * so there is no client script to go stale.
+ *
+ * One await only: a second top-level await in a view empties its scope.
+ */
+import { config } from '@stacksjs/config'
+import { loadDashboard } from '../../app/Uplink/dashboard'
+
+// Private: it shows who may text this Mac and everything they asked. It only
+// exists on the Mac running Uplink - a deployed copy (the marketing site)
+// answers 404 and never touches Messages, launchd or the runs table.
+const isLocal = config.app.env !== 'production'
+if (!isLocal)
+  notFound()
+
+const data = isLocal
+  ? await loadDashboard()
+  : { live: false, headline: 'Not found', checks: [], ready: false, allowed: [], active: [], runs: [], totals: { runs: 0, done: 0, failed: 0, spend: '$0.00' } }
+
+const statusTone = !data.live ? 'bg-neutral-400' : data.ready ? 'bg-emerald-500' : 'bg-amber-500'
+const failing = data.checks.filter(check => !check.ok)
+const commands = [
+  { word: 'status', does: 'What it is working on right now' },
+  { word: 'stop', does: 'Cancel the current task and anything queued' },
+  { word: 'new', does: 'Forget the conversation and start fresh' },
+  { word: 'more', does: 'The rest of a reply that was too long to send at once' },
+  { word: 'ping', does: 'Check it is alive' },
+]
+const statusStyles = {
+  done: 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950',
+  failed: 'text-red-700 bg-red-50 dark:text-red-300 dark:bg-red-950',
+  running: 'text-sky-700 bg-sky-50 dark:text-sky-300 dark:bg-sky-950',
+  queued: 'text-neutral-600 bg-neutral-100 dark:text-neutral-300 dark:bg-neutral-800',
+  stopped: 'text-neutral-600 bg-neutral-100 dark:text-neutral-300 dark:bg-neutral-800',
+}
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="15">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Uplink - {{ data.headline }}</title>
+    <meta name="description" content="Text this Mac from anywhere, even over satellite, and it answers with Claude.">
+  </head>
+  <body class="min-h-screen antialiased text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-950">
+    <main class="mx-auto px-4 py-10 sm:px-6 sm:py-16 max-w-4xl">
+      <header class="flex flex-wrap gap-4 items-end justify-between pb-8 border-b border-neutral-200 dark:border-neutral-800">
+        <div>
+          <p class="flex gap-2 items-center font-medium text-neutral-500 text-sm dark:text-neutral-400">
+            <span class="size-4 i-hugeicons-satellite-02" aria-hidden="true"></span>
+            Uplink
+          </p>
+          <h1 class="flex gap-3 items-center mt-2 font-semibold text-3xl tracking-tight">
+            <span class="inline-block size-2.5 rounded-full {{ statusTone }}" aria-hidden="true"></span>
+            {{ data.headline }}
+          </h1>
+          <p class="mt-2 max-w-xl text-neutral-600 dark:text-neutral-400">
+            Text this Mac from your phone, even over satellite with no data, and Claude answers here.
+          </p>
+        </div>
+        <dl class="grid gap-6 grid-cols-3 text-right">
+          <div>
+            <dt class="text-neutral-500 text-xs tracking-wide uppercase">Runs</dt>
+            <dd class="mt-1 font-mono tabular-nums text-xl">{{ data.totals.runs }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500 text-xs tracking-wide uppercase">Failed</dt>
+            <dd class="mt-1 font-mono tabular-nums text-xl">{{ data.totals.failed }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500 text-xs tracking-wide uppercase">At API rates</dt>
+            <dd class="mt-1 font-mono tabular-nums text-xl">{{ data.totals.spend }}</dd>
+          </div>
+        </dl>
+      </header>
+
+      @if(data.active.length > 0)
+        <section class="mt-10" aria-labelledby="now">
+          <h2 id="now" class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">Working on</h2>
+          <ul class="mt-4 space-y-3">
+            @foreach(data.active as run)
+              <li class="p-4 bg-white dark:bg-neutral-900 border border-sky-200 rounded-lg dark:border-sky-900">
+                <p class="font-medium">{{ run.prompt }}</p>
+                <p class="mt-1 font-mono text-neutral-500 text-sm">{{ run.elapsed }} · {{ run.lastActivity }}</p>
+              </li>
+            @endforeach
+          </ul>
+        </section>
+      @endif
+
+      <section class="grid gap-10 lg:grid-cols-5 mt-10" aria-label="Setup and usage">
+        <div class="lg:col-span-3">
+          <h2 class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">
+            Setup @if(failing.length > 0)<span class="normal-case text-amber-600 tracking-normal dark:text-amber-400">({{ failing.length }} to do)</span>@endif
+          </h2>
+          <ul class="mt-4 bg-white dark:bg-neutral-900 border border-neutral-200 divide-neutral-200 divide-y rounded-lg dark:border-neutral-800 dark:divide-neutral-800">
+            @foreach(data.checks as check)
+              <li class="flex gap-3 p-4">
+                @if(check.ok)
+                  <span class="shrink-0 mt-0.5 size-5 text-emerald-600 i-hugeicons-checkmark-circle-02" aria-label="Done"></span>
+                @else
+                  <span class="shrink-0 mt-0.5 size-5 text-amber-600 i-hugeicons-alert-circle" aria-label="To do"></span>
+                @endif
+                <div class="min-w-0">
+                  <p class="font-medium">{{ check.name }}</p>
+                  <p class="mt-0.5 break-words text-neutral-600 text-sm dark:text-neutral-400">{{ check.detail }}</p>
+                  @if(!check.ok && check.fix)
+                    <p class="mt-2 px-2 py-1.5 break-words font-mono text-amber-900 text-xs dark:text-amber-200 bg-amber-50 dark:bg-amber-950 rounded">{{ check.fix }}</p>
+                  @endif
+                </div>
+              </li>
+            @endforeach
+          </ul>
+        </div>
+
+        <aside class="lg:col-span-2">
+          <h2 class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">Texting it</h2>
+          <p class="mt-4 text-neutral-600 text-sm dark:text-neutral-400">
+            @if(data.allowed.length > 0)
+              Send any question or task to
+              @foreach(data.allowed as handle)<span class="font-mono text-neutral-900 dark:text-neutral-100">{{ handle }}</span> @endforeach
+              from your phone. Replies start with a satellite.
+            @else
+              Set <span class="font-mono">UPLINK_ALLOWED</span> to the number or Apple ID you will text from.
+            @endif
+          </p>
+          <dl class="mt-5 space-y-3 text-sm">
+            @foreach(commands as command)
+              <div class="flex gap-3">
+                <dt class="shrink-0 w-12 font-medium font-mono">{{ command.word }}</dt>
+                <dd class="text-neutral-600 dark:text-neutral-400">{{ command.does }}</dd>
+              </div>
+            @endforeach
+          </dl>
+        </aside>
+      </section>
+
+      <section class="mt-12" aria-labelledby="history">
+        <h2 id="history" class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">Recent texts</h2>
+        @if(data.runs.length === 0)
+          <p class="mt-4 p-8 text-center text-neutral-500 border border-dashed border-neutral-300 rounded-lg dark:border-neutral-700">
+            Nothing yet. Text it "ping" once setup is done.
+          </p>
+        @else
+          <ol class="mt-4 space-y-3">
+            @foreach(data.runs as run)
+              <li class="p-4 bg-white dark:bg-neutral-900 border border-neutral-200 rounded-lg dark:border-neutral-800">
+                <div class="flex flex-wrap gap-2 items-baseline justify-between">
+                  <p class="min-w-0 break-words font-medium">{{ run.prompt }}</p>
+                  <span class="rounded px-2 py-0.5 text-xs font-medium {{ statusStyles[run.status] }}">{{ run.status }}</span>
+                </div>
+                @if(run.answer)
+                  <p class="mt-2 break-words text-neutral-600 text-sm dark:text-neutral-400">{{ run.answer }}</p>
+                @endif
+                <p class="mt-2 font-mono text-neutral-500 text-xs">
+                  {{ run.when }} · {{ run.where }}@if(run.took) · {{ run.took }}@endif@if(run.cost) · {{ run.cost }}@endif
+                </p>
+              </li>
+            @endforeach
+          </ol>
+        @endif
+      </section>
+    </main>
+  </body>
+</html>

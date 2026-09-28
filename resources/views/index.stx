@@ -1,31 +1,78 @@
 <script server>
 /**
- * Uplink's dashboard: is it listening, what does setup still need, and what
- * has it done. Server-rendered and refreshed by the browser every 15 seconds,
- * so there is no client script to go stale.
+ * uplink.stacksjs.com - the public page.
  *
- * One await only: a second top-level await in a view empties its scope.
+ * Design read: a product landing page for technical Mac users, calm
+ * dark-tech language, Geist + one sodium-amber accent (the colour of the
+ * city lights in the hero photo). Dials 7 / 5 / 4.
+ *
+ * Everything shown is real: the two exchanges are genuine Uplink replies
+ * from 2026-09-27 (passed through the same formatter a text goes through),
+ * the commands are the ones the app ships, the photos are NASA's.
+ * No client script: motion is CSS only, and every animation has a
+ * reduced-motion fallback.
  */
-import { loadDashboard } from '../../app/Uplink/dashboard'
+const siteUrl = 'https://uplink.stacksjs.com'
+const title = 'Uplink - text your Mac, get Claude, even over satellite'
+const description = 'Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac.'
 
-const data = await loadDashboard()
-
-const statusTone = !data.live ? 'bg-neutral-400' : data.ready ? 'bg-emerald-500' : 'bg-amber-500'
-const failing = data.checks.filter(check => !check.ok)
-const commands = [
-  { word: 'status', does: 'What it is working on right now' },
-  { word: 'stop', does: 'Cancel the current task and anything queued' },
-  { word: 'new', does: 'Forget the conversation and start fresh' },
-  { word: 'more', does: 'The rest of a reply that was too long to send at once' },
-  { word: 'ping', does: 'Check it is alive' },
+const exchanges = [
+  {
+    ask: 'When will the padres play on Thursday? And what\'s the nfl scores today?',
+    reply: 'Padres: no regular-season game this Thursday - they clinched a playoff spot and are in the NL Wild Card Series vs the Cubs; Game 3 (if needed) is set for Thursday Oct 1, time TBA.\n\nNFL today (Sun 9/27) early games: Steelers 30, Bengals 27; Lions 31, Jets 24; Jaguars 35, Patriots 6; Bills 24, Chargers 16; Browns 21, Panthers 18. More games still to kick off later today.',
+    note: 'Two web searches, 14 seconds.',
+  },
+  {
+    ask: 'What changed in ~/Code/stacks today? Three short lines.',
+    reply: 'Today: fixed CMS article images (Medium-style publish + stx script left alone), tightened typecheck so @stacksjs subpaths resolve to source not stale dist, fixed noUncheckedIndexedAccess in image reader, and cut releases v0.75.7 and v0.75.8.',
+    note: 'Ran git log inside the repo, 14 seconds.',
+  },
 ]
-const statusStyles = {
-  done: 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950',
-  failed: 'text-red-700 bg-red-50 dark:text-red-300 dark:bg-red-950',
-  running: 'text-sky-700 bg-sky-50 dark:text-sky-300 dark:bg-sky-950',
-  queued: 'text-neutral-600 bg-neutral-100 dark:text-neutral-300 dark:bg-neutral-800',
-  stopped: 'text-neutral-600 bg-neutral-100 dark:text-neutral-300 dark:bg-neutral-800',
-}
+
+const steps = [
+  { icon: 'i-hugeicons-message-01', verb: 'Text', body: 'Message yourself from your iPhone. iMessage over satellite needs no cell or Wi-Fi signal.' },
+  { icon: 'i-hugeicons-inbox', verb: 'Read', body: 'Uplink watches the Messages database on your Mac and picks up texts from handles you allow.' },
+  { icon: 'i-hugeicons-terminal', verb: 'Run', body: 'Claude Code runs headless on your Claude plan, inside the repository your text names.' },
+  { icon: 'i-hugeicons-sent', verb: 'Reply', body: 'The answer comes back as plain text, split into at most three messages.' },
+]
+
+const words = [
+  { word: 'status', does: 'what it is working on' },
+  { word: 'stop', does: 'cancel the task and the queue' },
+  { word: 'new', does: 'start a fresh conversation' },
+  { word: 'more', does: 'the rest of a long reply' },
+  { word: 'ping', does: 'check it is alive' },
+]
+
+const setup = [
+  { verb: 'Install', body: 'Builds Uplink.app and starts it at login.', command: './buddy uplink:install' },
+  { verb: 'Grant access', body: 'In System Settings, Privacy & Security, Full Disk Access, switch on Uplink. Nothing else gets it.', command: '' },
+  { verb: 'Sign in', body: 'Mint a long-lived token for your Claude plan, then store it from the clipboard.', command: 'claude setup-token\n./buddy env:set CLAUDE_CODE_OAUTH_TOKEN "$(pbpaste | tr -d \'[:space:]\')"' },
+  { verb: 'Text it', body: 'Send yourself ping. The first reply asks once to control Messages.', command: '' },
+]
+
+const faqs = [
+  {
+    q: 'Does texting yourself work over satellite?',
+    a: 'It depends on how your iPhone routes a message to your own number, so try it once before you rely on it. If it does not arrive, sign the Mac into a second Apple ID and text that instead.',
+  },
+  {
+    q: 'Do I need an API key?',
+    a: 'No. Uplink runs the Claude Code CLI on the plan you are already logged into, such as Claude Max, through a token from claude setup-token.',
+  },
+  {
+    q: 'What can it do on my Mac?',
+    a: 'Anything Claude Code can: search the web, read and edit files, run your tests. That is why only one-to-one chats with handles you allow can reach it.',
+  },
+  {
+    q: 'What does it cost?',
+    a: 'Nothing on top of your Claude plan. The dashboard shows what each run would have cost at API rates, in cents, so you can see what you use.',
+  },
+  {
+    q: 'What happens while my Mac sleeps?',
+    a: 'Nothing, so Uplink keeps it from idle-sleeping while it runs. A laptop with its lid closed still sleeps unless it is on power with a display attached.',
+  },
+]
 </script>
 
 @nolayout
@@ -34,128 +81,271 @@ const statusStyles = {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="refresh" content="15">
-    <title>Uplink - {{ data.headline }}</title>
-    <meta name="description" content="Text this Mac from anywhere, even over satellite, and it answers with Claude.">
+    <title>{{ title }}</title>
+    <meta name="description" content="{{ description }}">
+    <link rel="canonical" href="{{ siteUrl }}/">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ siteUrl }}/">
+    <meta property="og:title" content="{{ title }}">
+    <meta property="og:description" content="{{ description }}">
+    <meta property="og:image" content="{{ siteUrl }}/images/california-night-1920.jpg">
+    <meta property="og:image:alt" content="The California coast at night, photographed from the International Space Station">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="color-scheme" content="light dark">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap">
+    <link rel="preload" as="image" href="/images/california-night-1920.jpg" imagesrcset="/images/california-night-960.jpg 960w, /images/california-night-1920.jpg 1920w" imagesizes="(min-width: 1024px) 50vw, 100vw">
+    <style>
+      /* Tokens. One accent: sodium amber, the colour of the city lights in the photos. */
+      :root {
+        --paper: #fafaf9;
+        --ink: #18181b;
+        --muted: #52525b;
+        --line: #e4e4e7;
+        --raised: #ffffff;
+        --accent: #f59e0b;
+        --accent-ink: #b45309;
+        --accent-wash: #fffbeb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #0c0c0e;
+          --ink: #f4f4f5;
+          --muted: #a1a1aa;
+          --line: #27272a;
+          --raised: #141417;
+          --accent-ink: #fbbf24;
+          --accent-wash: #1c1508;
+        }
+      }
+
+      html body.uplink { background: var(--paper); color: var(--ink); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; }
+      .uplink .u-mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace; }
+      .uplink .u-muted { color: var(--muted); }
+      .uplink .u-accent { color: var(--accent-ink); }
+      .uplink .u-line { border-color: var(--line); }
+      .uplink .u-raised { background: var(--raised); }
+      .uplink .u-wash { background: var(--accent-wash); }
+
+      /* Buttons: pills. Containers: 16px. That is the whole radius system. */
+      .uplink .u-btn { display: inline-flex; align-items: center; gap: .5rem; white-space: nowrap; border-radius: 9999px; padding: .75rem 1.25rem; font-weight: 600; transition: transform .2s cubic-bezier(.16, 1, .3, 1), background-color .2s; }
+      .uplink .u-btn:active { transform: translateY(1px) scale(.98); }
+      .uplink .u-btn-primary { background: var(--accent); color: #18181b; }
+      .uplink .u-btn-primary:hover { background: #fbbf24; }
+      .uplink .u-btn-ghost { border: 1px solid var(--line); color: var(--ink); }
+      .uplink .u-btn-ghost:hover { border-color: var(--muted); }
+      .uplink a:focus-visible, .uplink summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+      .uplink .u-nav { background: color-mix(in srgb, var(--paper) 82%, transparent); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); }
+      @media (prefers-reduced-transparency: reduce) { .uplink .u-nav { background: var(--paper); backdrop-filter: none; } }
+
+      .uplink .u-code { background: #111113; color: #e4e4e7; border: 1px solid var(--line); }
+      .uplink .u-code .u-prompt { color: #fbbf24; user-select: none; }
+
+      .uplink details > summary { list-style: none; cursor: pointer; }
+      .uplink details > summary::-webkit-details-marker { display: none; }
+      .uplink details[open] .u-chevron { transform: rotate(45deg); }
+      .uplink .u-chevron { transition: transform .25s cubic-bezier(.16, 1, .3, 1); }
+
+      /* Motion. The hero arrives in reading order; each exchange reveals
+         question first, then answer, the order a text thread fills in. */
+      @media (prefers-reduced-motion: no-preference) {
+        .uplink .u-rise { animation: u-rise .8s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+        @keyframes u-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+        @supports (animation-timeline: view()) {
+          .uplink .u-reveal { animation: u-rise linear both; animation-timeline: view(); animation-range: entry 5% cover 30%; }
+          .uplink .u-reveal-late { animation: u-rise linear both; animation-timeline: view(); animation-range: entry 25% cover 40%; }
+        }
+      }
+    </style>
   </head>
-  <body class="min-h-screen antialiased text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-950">
-    <main class="mx-auto px-4 py-10 sm:px-6 sm:py-16 max-w-4xl">
-      <header class="flex flex-wrap gap-4 items-end justify-between pb-8 border-b border-neutral-200 dark:border-neutral-800">
+  <body class="antialiased uplink">
+    <header class="sticky top-0 border-b u-line u-nav" style="z-index: 20">
+      <nav class="flex items-center justify-between mx-auto px-4 sm:px-6 h-16 max-w-6xl" aria-label="Main">
+        <a href="/" class="flex gap-2 items-center font-semibold text-lg tracking-tight">
+          <span class="size-5 i-hugeicons-satellite-02 u-accent" aria-hidden="true"></span>
+          Uplink
+        </a>
+        <div class="flex gap-6 items-center text-sm">
+          <a href="#how" class="hidden sm:inline hover:opacity-80 u-muted">How it works</a>
+          <a href="#questions" class="hidden sm:inline hover:opacity-80 u-muted">Questions</a>
+          <a href="#setup" class="u-btn u-btn-primary" style="padding: .5rem 1rem">Set it up</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="grid gap-10 items-center lg:gap-14 lg:grid-cols-[1.05fr_1fr] mx-auto pb-16 pt-12 px-4 sm:px-6 lg:pb-24 lg:pt-20 max-w-6xl">
         <div>
-          <p class="flex gap-2 items-center font-medium text-neutral-500 text-sm dark:text-neutral-400">
-            <span class="size-4 i-hugeicons-satellite-02" aria-hidden="true"></span>
-            Uplink
-          </p>
-          <h1 class="flex gap-3 items-center mt-2 font-semibold text-3xl tracking-tight">
-            <span class="inline-block size-2.5 rounded-full {{ statusTone }}" aria-hidden="true"></span>
-            {{ data.headline }}
+          <h1 class="font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl lg:text-6xl u-rise" style="--i: 0">
+            Off the grid, still one text from Claude.
           </h1>
-          <p class="mt-2 max-w-xl text-neutral-600 dark:text-neutral-400">
-            Text this Mac from your phone, even over satellite with no data, and Claude answers here.
+          <p class="mt-6 max-w-[34rem] leading-relaxed text-lg u-muted u-rise" style="--i: 1">
+            Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac.
           </p>
+          <div class="flex flex-wrap gap-3 mt-8 u-rise" style="--i: 2">
+            <a href="#setup" class="u-btn u-btn-primary">
+              Set it up
+              <span class="size-4 i-hugeicons-arrow-right-01" aria-hidden="true"></span>
+            </a>
+            <a href="#how" class="u-btn u-btn-ghost">How it works</a>
+          </div>
         </div>
-        <dl class="grid gap-6 grid-cols-3 text-right">
-          <div>
-            <dt class="text-neutral-500 text-xs tracking-wide uppercase">Runs</dt>
-            <dd class="mt-1 font-mono tabular-nums text-xl">{{ data.totals.runs }}</dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500 text-xs tracking-wide uppercase">Failed</dt>
-            <dd class="mt-1 font-mono tabular-nums text-xl">{{ data.totals.failed }}</dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500 text-xs tracking-wide uppercase">At API rates</dt>
-            <dd class="mt-1 font-mono tabular-nums text-xl">{{ data.totals.spend }}</dd>
-          </div>
-        </dl>
-      </header>
-
-      @if(data.active.length > 0)
-        <section class="mt-10" aria-labelledby="now">
-          <h2 id="now" class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">Working on</h2>
-          <ul class="mt-4 space-y-3">
-            @foreach(data.active as run)
-              <li class="p-4 bg-white dark:bg-neutral-900 border border-sky-200 rounded-lg dark:border-sky-900">
-                <p class="font-medium">{{ run.prompt }}</p>
-                <p class="mt-1 font-mono text-neutral-500 text-sm">{{ run.elapsed }} · {{ run.lastActivity }}</p>
-              </li>
-            @endforeach
-          </ul>
-        </section>
-      @endif
-
-      <section class="grid gap-10 lg:grid-cols-5 mt-10" aria-label="Setup and usage">
-        <div class="lg:col-span-3">
-          <h2 class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">
-            Setup @if(failing.length > 0)<span class="normal-case text-amber-600 tracking-normal dark:text-amber-400">({{ failing.length }} to do)</span>@endif
-          </h2>
-          <ul class="mt-4 bg-white dark:bg-neutral-900 border border-neutral-200 divide-neutral-200 divide-y rounded-lg dark:border-neutral-800 dark:divide-neutral-800">
-            @foreach(data.checks as check)
-              <li class="flex gap-3 p-4">
-                @if(check.ok)
-                  <span class="shrink-0 mt-0.5 size-5 text-emerald-600 i-hugeicons-checkmark-circle-02" aria-label="Done"></span>
-                @else
-                  <span class="shrink-0 mt-0.5 size-5 text-amber-600 i-hugeicons-alert-circle" aria-label="To do"></span>
-                @endif
-                <div class="min-w-0">
-                  <p class="font-medium">{{ check.name }}</p>
-                  <p class="mt-0.5 break-words text-neutral-600 text-sm dark:text-neutral-400">{{ check.detail }}</p>
-                  @if(!check.ok && check.fix)
-                    <p class="mt-2 px-2 py-1.5 break-words font-mono text-amber-900 text-xs dark:text-amber-200 bg-amber-50 dark:bg-amber-950 rounded">{{ check.fix }}</p>
-                  @endif
-                </div>
-              </li>
-            @endforeach
-          </ul>
-        </div>
-
-        <aside class="lg:col-span-2">
-          <h2 class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">Texting it</h2>
-          <p class="mt-4 text-neutral-600 text-sm dark:text-neutral-400">
-            @if(data.allowed.length > 0)
-              Send any question or task to
-              @foreach(data.allowed as handle)<span class="font-mono text-neutral-900 dark:text-neutral-100">{{ handle }}</span> @endforeach
-              from your phone. Replies start with a satellite.
-            @else
-              Set <span class="font-mono">UPLINK_ALLOWED</span> to the number or Apple ID you will text from.
-            @endif
-          </p>
-          <dl class="mt-5 space-y-3 text-sm">
-            @foreach(commands as command)
-              <div class="flex gap-3">
-                <dt class="shrink-0 w-12 font-medium font-mono">{{ command.word }}</dt>
-                <dd class="text-neutral-600 dark:text-neutral-400">{{ command.does }}</dd>
-              </div>
-            @endforeach
-          </dl>
-        </aside>
+        <figure class="overflow-hidden rounded-2xl u-rise" style="--i: 1">
+          <img
+            src="/images/california-night-1920.jpg"
+            srcset="/images/california-night-960.jpg 960w, /images/california-night-1920.jpg 1920w"
+            sizes="(min-width: 1024px) 50vw, 100vw"
+            width="1920"
+            height="1277"
+            alt="The California coast at night from the International Space Station, city lights glowing orange under a thin band of atmosphere"
+            class="block h-auto w-full"
+            fetchpriority="high"
+          >
+        </figure>
       </section>
 
-      <section class="mt-12" aria-labelledby="history">
-        <h2 id="history" class="font-semibold text-neutral-500 text-sm tracking-wide uppercase">Recent texts</h2>
-        @if(data.runs.length === 0)
-          <p class="mt-4 p-8 text-center text-neutral-500 border border-dashed border-neutral-300 rounded-lg dark:border-neutral-700">
-            Nothing yet. Text it "ping" once setup is done.
-          </p>
-        @else
-          <ol class="mt-4 space-y-3">
-            @foreach(data.runs as run)
-              <li class="p-4 bg-white dark:bg-neutral-900 border border-neutral-200 rounded-lg dark:border-neutral-800">
-                <div class="flex flex-wrap gap-2 items-baseline justify-between">
-                  <p class="min-w-0 break-words font-medium">{{ run.prompt }}</p>
-                  <span class="rounded px-2 py-0.5 text-xs font-medium {{ statusStyles[run.status] }}">{{ run.status }}</span>
+      <section class="border-t u-line" aria-labelledby="real-texts">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-3xl">
+          <h2 id="real-texts" class="font-semibold text-3xl tracking-tight md:text-4xl">Two real texts, answered.</h2>
+          <p class="mt-4 max-w-[60ch] u-muted">Replies from September 27, 2026, exactly as Uplink sends them: plain text, marked with a satellite.</p>
+
+          <div class="mt-12 space-y-14">
+            @foreach(exchanges as exchange)
+              <article class="grid gap-4">
+                <div class="justify-self-end max-w-[85%] u-reveal">
+                  <p class="px-5 py-3 rounded-2xl" style="background: var(--accent); color: #18181b">{{ exchange.ask }}</p>
                 </div>
-                @if(run.answer)
-                  <p class="mt-2 break-words text-neutral-600 text-sm dark:text-neutral-400">{{ run.answer }}</p>
-                @endif
-                <p class="mt-2 font-mono text-neutral-500 text-xs">
-                  {{ run.when }} · {{ run.where }}@if(run.took) · {{ run.took }}@endif@if(run.cost) · {{ run.cost }}@endif
-                </p>
+                <div class="max-w-[92%] u-reveal-late">
+                  <p class="px-5 py-4 whitespace-pre-line border rounded-2xl u-line u-raised">🛰 {{ exchange.reply }}</p>
+                  <p class="mt-2 pl-1 text-sm u-mono u-muted">{{ exchange.note }}</p>
+                </div>
+              </article>
+            @endforeach
+          </div>
+        </div>
+      </section>
+
+      <section id="how" class="border-t scroll-mt-16 u-line" aria-labelledby="how-title">
+        <div class="grid gap-12 lg:gap-20 lg:grid-cols-[0.9fr_1.1fr] mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
+          <div class="lg:sticky lg:top-28 lg:self-start">
+            <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">How it works</p>
+            <h2 id="how-title" class="mt-3 font-semibold text-3xl tracking-tight md:text-4xl">From a text to a Claude Code session, and back.</h2>
+            <p class="mt-4 max-w-[46ch] u-muted">No server in between. Your Mac reads the message, does the work and answers through Messages.</p>
+          </div>
+          <ol class="grid gap-10">
+            @foreach(steps as step)
+              <li class="grid gap-4 grid-cols-[auto_1fr] u-reveal">
+                <span class="grid place-items-center size-11 rounded-full u-wash" aria-hidden="true">
+                  <span class="size-5 u-accent {{ step.icon }}"></span>
+                </span>
+                <div>
+                  <h3 class="font-semibold text-xl">{{ step.verb }}</h3>
+                  <p class="mt-1 max-w-[52ch] leading-relaxed u-muted">{{ step.body }}</p>
+                </div>
               </li>
             @endforeach
           </ol>
-        @endif
+        </div>
+      </section>
+
+      <section class="border-t u-line" aria-labelledby="built-for">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
+          <h2 id="built-for" class="max-w-[22ch] font-semibold text-3xl tracking-tight md:text-4xl">Built for a thin link and a real machine.</h2>
+
+          <div class="grid gap-4 lg:grid-cols-3 lg:grid-rows-[auto_auto] mt-12">
+            <article class="flex overflow-hidden relative flex-col justify-end lg:col-span-2 lg:row-span-2 min-h-[22rem] rounded-2xl u-reveal">
+              <img
+                src="/images/milky-way-airglow-1920.jpg"
+                srcset="/images/milky-way-airglow-960.jpg 960w, /images/milky-way-airglow-1920.jpg 1920w"
+                sizes="(min-width: 1024px) 66vw, 100vw"
+                width="1920"
+                height="1277"
+                alt="The Milky Way above a band of orange airglow, photographed from the International Space Station"
+                loading="lazy"
+                class="absolute inset-0 object-cover h-full w-full"
+              >
+              <div class="relative p-6 sm:p-8" style="background: linear-gradient(to top, rgb(9 9 11 / .92), rgb(9 9 11 / .55) 70%, transparent); color: #f4f4f5">
+                <h3 class="font-semibold text-2xl">Short answers, few texts.</h3>
+                <p class="mt-2 max-w-[48ch]" style="color: #d4d4d8">Plain text, no markdown. A long reply is split into three texts, and the rest waits until you send more.</p>
+              </div>
+            </article>
+
+            <article class="p-6 border rounded-2xl u-line u-raised u-reveal">
+              <span class="size-6 i-hugeicons-folder-code u-accent" aria-hidden="true"></span>
+              <h3 class="mt-4 font-semibold text-xl">Works inside your repos</h3>
+              <p class="mt-2 leading-relaxed u-muted">Name a path and the run starts there, with that repository's CLAUDE.md, hooks and settings. Follow-ups continue the session.</p>
+            </article>
+
+            <article class="p-6 rounded-2xl u-reveal u-wash">
+              <h3 class="font-semibold text-xl">Five words it always answers</h3>
+              <dl class="grid gap-2 mt-4 text-sm">
+                @foreach(words as item)
+                  <div class="grid gap-3 grid-cols-[4rem_1fr]">
+                    <dt class="font-medium u-accent u-mono">{{ item.word }}</dt>
+                    <dd class="u-muted">{{ item.does }}</dd>
+                  </div>
+                @endforeach
+              </dl>
+            </article>
+
+            <article class="flex flex-col gap-4 sm:flex-row sm:items-center lg:col-span-3 p-6 border rounded-2xl u-line u-raised u-reveal">
+              <span class="grid place-items-center shrink-0 size-11 rounded-full u-wash" aria-hidden="true">
+                <span class="size-5 i-hugeicons-lock-key u-accent"></span>
+              </span>
+              <div>
+                <h3 class="font-semibold text-xl">Nobody else can use it</h3>
+                <p class="mt-1 leading-relaxed u-muted">Only one-to-one chats with handles you allow. Group chats are ignored, and only Uplink.app gets Full Disk Access, not your terminal.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="setup" class="border-t scroll-mt-16 u-line" aria-labelledby="setup-title">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
+          <h2 id="setup-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Set it up in four steps.</h2>
+          <p class="mt-4 max-w-[60ch] u-muted">You need a Mac signed in to Messages, the Claude Code CLI and a Claude plan. Run these from the Uplink app directory.</p>
+
+          <div class="grid gap-x-10 gap-y-12 md:grid-cols-2 mt-12">
+            @foreach(setup as item)
+              <div class="u-reveal">
+                <h3 class="font-semibold text-xl">{{ item.verb }}</h3>
+                <p class="mt-2 max-w-[52ch] leading-relaxed u-muted">{{ item.body }}</p>
+                @if(item.command)
+                  <pre class="mt-4 p-4 break-words leading-relaxed text-sm whitespace-pre-wrap rounded-2xl u-code u-mono"><code>{{ item.command }}</code></pre>
+                @endif
+              </div>
+            @endforeach
+          </div>
+        </div>
+      </section>
+
+      <section id="questions" class="border-t scroll-mt-16 u-line" aria-labelledby="questions-title">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-3xl">
+          <h2 id="questions-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Questions</h2>
+          <div class="mt-10 border-t u-line">
+            @foreach(faqs as faq)
+              <details class="border-b u-line">
+                <summary class="flex gap-6 items-center justify-between py-5 font-medium text-lg">
+                  {{ faq.q }}
+                  <span class="shrink-0 size-5 i-hugeicons-plus-sign u-chevron u-muted" aria-hidden="true"></span>
+                </summary>
+                <p class="pb-6 max-w-[62ch] leading-relaxed u-muted">{{ faq.a }}</p>
+              </details>
+            @endforeach
+          </div>
+        </div>
       </section>
     </main>
+
+    <footer class="border-t u-line">
+      <div class="flex flex-col gap-3 sm:flex-row sm:justify-between mx-auto px-4 py-10 sm:px-6 max-w-6xl text-sm u-muted">
+        <p>Uplink is built with <a href="https://stacksjs.com" class="underline underline-offset-4 hover:opacity-80">Stacks</a>.</p>
+        <p>Earth photos: NASA, ISS Expedition 40.</p>
+      </div>
+    </footer>
   </body>
 </html>

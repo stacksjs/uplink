@@ -89,6 +89,11 @@ describe('format', () => {
       .toBe('Scores\n\nChiefs 24, Bills 21\n\n- one\n- two\n\nESPN (https://espn.com)\n\nconst x = 1')
   })
 
+  it('turns em and en dashes into plain hyphens', () => {
+    expect(toPlainText('no game Thursday \u2014 they clinched; Game 3 is Oct 1\u2013ish'))
+      .toBe('no game Thursday - they clinched; Game 3 is Oct 1 - ish')
+  })
+
   it('splits on the best boundary and never exceeds the limit', () => {
     const text = 'First paragraph here.\n\nSecond paragraph is a bit longer than the first one.'
     expect(chunk(text, 40)).toEqual(['First paragraph here.', 'Second paragraph is a bit longer than', 'the first one.'])

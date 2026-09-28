@@ -3,14 +3,18 @@ import type { CloudConfig as TsCloudConfig } from '@stacksjs/ts-cloud'
 import { env } from '@stacksjs/env'
 
 const APP_SLUG = 'uplink'
-const APP_DOMAIN = env.APP_DOMAIN || undefined
+const APP_DOMAIN = env.APP_DOMAIN || 'uplink.stacksjs.com'
 
 /**
- * Safe application cloud defaults.
+ * uplink.stacksjs.com: the public page, a tenant on the stacks Hetzner box.
  *
- * Set APP_DOMAIN and provider credentials before the first deploy. Use
- * `cloud.attachTo` only when this app is intentionally joining a server owned
- * by another ts-cloud project.
+ * Only the marketing page is public. The Uplink service itself runs on the
+ * Mac that holds Messages; nothing here reads a chat.db or runs an agent, and
+ * `/dashboard` answers 404 in production. So the release mounts no framework
+ * routes (`STACKS_DEFAULT_ROUTES: 'none'`) and runs no migrations.
+ *
+ * Ports 3240/3248 were free in `ss -lntp` on the box on 2026-09-27 (config
+ * files are not a reliable source: two tenants can bind one port silently).
  */
 export const tsCloud: TsCloudConfig = {
   project: {
@@ -21,16 +25,9 @@ export const tsCloud: TsCloudConfig = {
 
   stateDir: 'storage/cloud',
 
-  // Deploy to Hetzner Cloud, or set `provider: 'ssh'` to deploy to a Linux box
-  // you already own over SSH (a Raspberry Pi, a NUC, an old laptop):
-  //
-  //   cloud: { provider: 'ssh' },
-  //   ssh: { profile: 'raspberry-pi', hosts: [{ host: 'pi-stacks.local', user: 'pi' }] },
-  //
-  // See `buddy server:flash`, `server:first-boot`, `server:doctor` and
-  // `server:setup` for getting a fresh board to that point.
   cloud: {
     provider: 'hetzner',
+    attachTo: 'stacks',
   },
 
   mode: 'server',
@@ -49,6 +46,11 @@ export const tsCloud: TsCloudConfig = {
   },
 
   infrastructure: {
+    dns: {
+      provider: 'cloudflare',
+      domain: 'stacksjs.com',
+    },
+
     compute: {
       instances: 1,
       size: 'small',
@@ -61,6 +63,27 @@ export const tsCloud: TsCloudConfig = {
       proxy: {
         engine: 'rpx',
         onDemandTls: true,
+
+        cdn: {
+          provider: 'cloudflare',
+          frontedHosts: [APP_DOMAIN],
+          cloudflare: {
+            settings: {
+              ssl: 'strict',
+              alwaysUseHttps: true,
+              minTlsVersion: '1.2',
+              brotli: true,
+              http3: true,
+              emailObfuscation: false,
+            },
+            cache: {
+              assetEdgeTtl: 2592000,
+              documentEdgeTtl: 300,
+              bypassPaths: ['/api/', '/_stacks/'],
+            },
+            purgeOnDeploy: true,
+          },
+        },
       },
     },
   },
@@ -71,28 +94,24 @@ export const tsCloud: TsCloudConfig = {
       path: '/',
       domain: APP_DOMAIN,
       start: 'bun node_modules/@stacksjs/buddy/dist/serve-entry.js',
-      port: 3000,
-      preStart: [
-        'bun install --frozen-lockfile',
-        'bun node_modules/@stacksjs/buddy/dist/cli.js migrate',
-      ],
-      env: {
-        APP_ENV: 'production',
-        NODE_ENV: 'production',
-        PORT_API: '3008',
-        API_URL: 'http://127.0.0.1:3008',
-      },
-    },
-
-    api: {
-      root: '.',
-      start: 'bun node_modules/@stacksjs/actions/dist/serve/api.js',
-      port: 3008,
+      port: 3240,
+      // The compiled Uplink.app, its heartbeat and the chat.db cursor are
+      // this Mac's, not the site's (and the .app alone is 60 MB).
+      exclude: ['storage/uplink'],
       preStart: ['bun install --frozen-lockfile'],
       env: {
         HOST: '127.0.0.1',
         APP_ENV: 'production',
         NODE_ENV: 'production',
+        APP_NAME: 'Uplink',
+        APP_URL: APP_DOMAIN,
+        APP_KEY: env.APP_KEY || '',
+        PORT_API: '3248',
+        API_URL: 'http://127.0.0.1:3248',
+        STACKS_DEFAULT_ROUTES: 'none',
+        DB_CONNECTION: 'sqlite',
+        DB_DATABASE: '/var/lib/uplink/stacks.sqlite',
+        DB_DATABASE_PATH: '/var/lib/uplink/stacks.sqlite',
       },
     },
   },

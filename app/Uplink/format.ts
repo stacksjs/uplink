@@ -19,6 +19,10 @@ export function toPlainText(markdown: string): string {
     .replace(/^[ \t]*[-*+][ \t]+/gm, '- ')
     .replace(/^[ \t]*>[ \t]?/gm, '')
     .replace(/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/gm, '')
+    // Em and en dashes become a spaced hyphen. Any character outside GSM-7
+    // turns an SMS into UCS-2, which fits 70 characters per segment instead
+    // of 160: over a satellite link that is more, slower texts.
+    .replace(/\s*[\u2014\u2013]\s*/g, ' - ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
