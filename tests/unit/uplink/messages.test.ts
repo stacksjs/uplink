@@ -32,7 +32,8 @@ describe('handles', () => {
     expect(normalizeHandle('1 555 000 1111')).toBe('+15550001111')
     expect(normalizeHandle('+44 20 7946 0958')).toBe('+442079460958')
     expect(normalizeHandle(' Me@iCloud.COM ')).toBe('me@icloud.com')
-    expect(parseHandleList('+15550001111, me@icloud.com  5550002222')).toEqual([ME, ME_EMAIL, FRIEND])
+    expect(parseHandleList('+15550001111, me@icloud.com;(555) 000-2222\n')).toEqual([ME, ME_EMAIL, FRIEND])
+    expect(parseHandleList('+44 20 7946 0958')).toEqual(['+442079460958'])
   })
 })
 

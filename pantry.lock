@@ -16,6 +16,7 @@
       },
       "system": {
         "bun.sh": "1.4.2",
+        "craft-native.org": "^0.0.92",
         "curl.se": "^8.22.0",
         "git-scm.org": "^2.47.0",
         "sqlite.org": "^3.47.2"
@@ -133,6 +134,12 @@
       "version": "1.4.2",
       "source": "pantry",
       "resolved": "registry:bun.sh@1.4.2"
+    },
+    "craft-native.org@0.0.92": {
+      "name": "craft-native.org",
+      "version": "0.0.92",
+      "source": "pantry",
+      "resolved": "registry:craft-native.org@0.0.92"
     },
     "curl.se/ca-certs@2026.3.19": {
       "name": "curl.se/ca-certs",

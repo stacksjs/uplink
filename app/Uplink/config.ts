@@ -29,14 +29,16 @@ export interface UplinkConfig {
   timeoutMs: number
 }
 
-function int(name: string, fallback: number): number {
-  const raw = process.env[name]
+type Env = Record<string, string | undefined>
+
+function int(env: Env, name: string, fallback: number): number {
+  const raw = env[name]
   const value = raw === undefined || raw === '' ? Number.NaN : Number(raw)
   return Number.isFinite(value) ? value : fallback
 }
 
-function str(name: string, fallback: string): string {
-  const raw = process.env[name]
+function str(env: Env, name: string, fallback: string): string {
+  const raw = env[name]
   return raw === undefined || raw === '' ? fallback : raw
 }
 
@@ -46,23 +48,24 @@ function expandHome(path: string): string {
 
 const MINUTE = 60_000
 
-export function loadConfig(): UplinkConfig {
+/** From .env in the Stacks app; the downloadable app passes `settingsEnv(settings)`. */
+export function loadConfig(env: Env = process.env): UplinkConfig {
   return {
-    allowed: parseHandleList(process.env.UPLINK_ALLOWED),
-    messagesDb: expandHome(str('UPLINK_MESSAGES_DB', DEFAULT_MESSAGES_DB)),
-    pollMs: int('UPLINK_POLL_MS', 2000),
-    catchUpMs: int('UPLINK_CATCH_UP_MS', 30 * MINUTE),
-    replyPrefix: str('UPLINK_REPLY_PREFIX', '🛰 '),
-    maxChars: int('UPLINK_MAX_CHARS', 1200),
-    maxParts: int('UPLINK_MAX_PARTS', 3),
-    ackAfterMs: int('UPLINK_ACK_AFTER_MS', 20_000),
-    progressEveryMs: int('UPLINK_PROGRESS_EVERY_MS', 10 * MINUTE),
-    sessionIdleMs: int('UPLINK_SESSION_IDLE_MS', 6 * 60 * MINUTE),
-    workdir: expandHome(str('UPLINK_WORKDIR', homedir())),
-    claudeBin: expandHome(str('UPLINK_CLAUDE_BIN', findClaude())),
-    model: process.env.UPLINK_MODEL || null,
-    permissionMode: str('UPLINK_PERMISSION_MODE', 'bypassPermissions'),
-    timeoutMs: int('UPLINK_TIMEOUT_MS', 90 * MINUTE),
+    allowed: parseHandleList(env.UPLINK_ALLOWED),
+    messagesDb: expandHome(str(env, 'UPLINK_MESSAGES_DB', DEFAULT_MESSAGES_DB)),
+    pollMs: int(env, 'UPLINK_POLL_MS', 2000),
+    catchUpMs: int(env, 'UPLINK_CATCH_UP_MS', 30 * MINUTE),
+    replyPrefix: str(env, 'UPLINK_REPLY_PREFIX', '🛰 '),
+    maxChars: int(env, 'UPLINK_MAX_CHARS', 1200),
+    maxParts: int(env, 'UPLINK_MAX_PARTS', 3),
+    ackAfterMs: int(env, 'UPLINK_ACK_AFTER_MS', 20_000),
+    progressEveryMs: int(env, 'UPLINK_PROGRESS_EVERY_MS', 10 * MINUTE),
+    sessionIdleMs: int(env, 'UPLINK_SESSION_IDLE_MS', 6 * 60 * MINUTE),
+    workdir: expandHome(str(env, 'UPLINK_WORKDIR', homedir())),
+    claudeBin: expandHome(str(env, 'UPLINK_CLAUDE_BIN', findClaude())),
+    model: env.UPLINK_MODEL || null,
+    permissionMode: str(env, 'UPLINK_PERMISSION_MODE', 'bypassPermissions'),
+    timeoutMs: int(env, 'UPLINK_TIMEOUT_MS', 90 * MINUTE),
   }
 }
 

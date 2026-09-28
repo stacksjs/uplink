@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Uplink</title>
+  <!--
+    The menubar popover. Served by the Uplink agent on 127.0.0.1 and hosted by
+    the Craft runtime; it drives the status item through window.craft.tray and
+    the popover through window.craft.window. Not an stx template: it runs in
+    the native webview inside Uplink.app, with no Stacks server behind it.
+  -->
+  <style>
+    :root {
+      --paper: #fafaf9; --raised: #ffffff; --ink: #18181b; --muted: #52525b; --line: #e4e4e7;
+      --accent: #f59e0b; --accent-ink: #b45309; --accent-wash: #fffbeb; --ok: #15803d; --warn: #b45309;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --paper: #111113; --raised: #18181b; --ink: #f4f4f5; --muted: #a1a1aa; --line: #27272a; --accent-ink: #fbbf24; --accent-wash: #1c1508; --ok: #4ade80; --warn: #fbbf24; }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+    body { display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid var(--line); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+    .dot.listening { background: var(--ok); }
+    .dot.working { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+    .dot.setup { background: var(--warn); }
+    @keyframes pulse { 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) { .dot.working { animation: none; } }
+    h1 { margin: 0; font-size: 15px; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 12px; }
+    main { flex: 1; overflow-y: auto; padding: 12px 16px 16px; }
+    section + section { margin-top: 18px; }
+    h2 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .card { background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+    .card + .card { margin-top: 8px; }
+    .step { display: grid; grid-template-columns: 18px 1fr; gap: 10px; }
+    .mark { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; border: 1.5px solid var(--line); color: var(--muted); }
+    .mark.ok { background: var(--ok); border-color: var(--ok); color: var(--paper); }
+    .step p { margin: 2px 0 0; color: var(--muted); word-break: break-word; }
+    .step strong { font-weight: 600; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    button { font: inherit; font-weight: 600; border-radius: 999px; padding: 6px 12px; border: 1px solid var(--line); background: var(--raised); color: var(--ink); cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #18181b; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .5; cursor: default; }
+    input, textarea { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, monospace; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; -webkit-user-select: text; user-select: text; }
+    input:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 12px; }
+    .help { margin: 4px 0 0; color: var(--muted); font-size: 11.5px; }
+    .error { margin: 6px 0 0; color: #dc2626; font-size: 12px; }
+    .run { padding: 10px 0; border-top: 1px solid var(--line); }
+    .run:first-child { border-top: 0; padding-top: 0; }
+    .run .q { font-weight: 600; }
+    .run .a { color: var(--muted); margin-top: 2px; }
+    .run .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .empty { color: var(--muted); text-align: center; padding: 18px 8px; }
+    footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    footer label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
+    footer input { width: auto; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot" aria-hidden="true"></span>
+    <div>
+      <h1 id="headline">Starting</h1>
+      <div class="sub" id="subline"></div>
+    </div>
+  </header>
+
+  <main>
+    <section id="setup" hidden>
+      <h2>Setup</h2>
+      <div class="card step" id="step-fda">
+        <span class="mark" data-mark>1</span>
+        <div>
+          <strong>Let Uplink read Messages</strong>
+          <p data-detail></p>
+          <div class="actions" data-when-todo>
+            <button class="primary" data-action="open-fda">Open Full Disk Access</button>
+          </div>
+          <p class="help" data-when-todo>Switch on Uplink in the list. It notices within a few seconds.</p>
+        </div>
+      </div>
+      <div class="card step" id="step-claude">
+        <span class="mark" data-mark>2</span>
+        <div>
+          <strong>Sign in to Claude</strong>
+          <p data-detail></p>
+          <div data-when-todo>
+            <p class="help">Uplink uses your Claude plan through Claude Code. Run <code>claude setup-token</code>, sign in, and paste the token it prints.</p>
+            <div class="actions"><button data-action="open-terminal">Run it in Terminal</button></div>
+            <label for="token">Token</label>
+            <textarea id="token" rows="3" placeholder="sk-ant-oat01-..." spellcheck="false" autocomplete="off"></textarea>
+            <div class="actions"><button class="primary" data-action="save-token">Save to Keychain</button><button data-action="test-claude">Check again</button></div>
+            <p class="error" id="token-error" hidden></p>
+          </div>
+        </div>
+      </div>
+      <div class="card step" id="step-handles">
+        <span class="mark" data-mark>3</span>
+        <div>
+          <strong>Choose who can text it</strong>
+          <p data-detail></p>
+          <label for="allowed">Phone numbers or Apple ID emails, one per line</label>
+          <textarea id="allowed" rows="2" spellcheck="false" placeholder="Empty: your own numbers and emails"></textarea>
+          <p class="help">Anyone listed can make Claude act on this Mac. Leave it empty to allow only yourself.</p>
+          <div class="actions"><button data-action="save-allowed">Save</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="now" hidden>
+      <h2>Working on</h2>
+      <div id="active"></div>
+    </section>
+
+    <section>
+      <h2>Recent texts</h2>
+      <div class="card" id="recent"><div class="empty">Nothing yet. Text yourself "ping".</div></div>
+    </section>
+  </main>
+
+  <footer>
+    <label><input type="checkbox" id="login"> Open at login</label>
+    <div class="actions" style="margin: 0">
+      <button data-action="toggle-pause" id="pause">Pause</button>
+      <button data-action="quit">Quit</button>
+    </div>
+  </footer>
+
+  <script>
+    const craft = globalThis.craft
+    const $ = selector => document.querySelector(selector)
+    const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+    const text = value => (value ?? '').toString()
+
+    let current = null
+    let lastMenu = ''
+    let lastIcon = ''
+    let allowedEdited = false
+
+    const ICONS = {
+      listening: 'antenna.radiowaves.left.and.right',
+      working: 'ellipsis.bubble',
+      setup: 'exclamationmark.triangle',
+      paused: 'pause.circle',
+    }
+    const HEADLINES = {
+      listening: 'Listening for texts',
+      working: 'Working',
+      setup: 'Finish setting up',
+      paused: 'Paused',
+    }
+
+    function renderStep(id, check) {
+      const el = $(id)
+      el.querySelector('[data-mark]').classList.toggle('ok', check.ok)
+      el.querySelector('[data-mark]').textContent = check.ok ? '✓' : el.dataset.n || el.querySelector('[data-mark]').textContent
+      el.querySelector('[data-detail]').textContent = check.detail
+      for (const node of el.querySelectorAll('[data-when-todo]'))
+        node.hidden = check.ok
+    }
+
+    function render(status) {
+      current = status
+      $('#dot').className = `dot ${status.state}`
+      $('#headline').textContent = HEADLINES[status.state] || status.state
+      $('#subline').textContent = status.state === 'working' && status.active[0]
+        ? status.active[0].lastActivity
+        : `Uplink ${status.version}`
+
+      const byId = Object.fromEntries(status.checks.map(check => [check.id, check]))
+      $('#setup').hidden = status.state !== 'setup'
+      renderStep('#step-fda', byId.fda)
+      renderStep('#step-claude', byId.claude)
+      renderStep('#step-handles', byId.handles)
+      if (!allowedEdited)
+        $('#allowed').value = status.settings.allowed.join('\n')
+
+      $('#now').hidden = status.active.length === 0
+      $('#active').replaceChildren(...status.active.map(run => {
+        const card = document.createElement('div')
+        card.className = 'card'
+        card.innerHTML = '<div class="run"><div class="q"></div><div class="meta"></div></div>'
+        card.querySelector('.q').textContent = run.prompt
+        card.querySelector('.meta').textContent = `${run.elapsed}, ${run.lastActivity}${run.queued ? `, ${run.queued} queued` : ''}`
+        return card
+      }))
+
+      const recent = $('#recent')
+      if (status.recent.length === 0) {
+        recent.innerHTML = '<div class="empty">Nothing yet. Text yourself "ping".</div>'
+      }
+      else {
+        recent.replaceChildren(...status.recent.map(run => {
+          const row = document.createElement('div')
+          row.className = 'run'
+          row.innerHTML = '<div class="q"></div><div class="a"></div><div class="meta"></div>'
+          row.querySelector('.q').textContent = run.prompt
+          row.querySelector('.a').textContent = run.answer
+          row.querySelector('.meta').textContent = `${run.status}${run.when ? `, ${run.when} ago` : ''}`
+          return row
+        }))
+      }
+
+      $('#login').checked = status.settings.openAtLogin
+      $('#pause').textContent = status.settings.paused ? 'Resume' : 'Pause'
+      updateTray(status)
+    }
+
+    function updateTray(status) {
+      if (!craft?.tray)
+        return
+      const icon = ICONS[status.state] || ICONS.listening
+      if (icon !== lastIcon) {
+        craft.tray.setIcon(icon)
+        craft.tray.setTitle('')
+        lastIcon = icon
+      }
+      craft.tray.setTooltip(`Uplink: ${HEADLINES[status.state] || status.state}`)
+      // Action names show, hide, toggle and quit are handled natively.
+      const menu = [
+        { label: HEADLINES[status.state] || status.state, action: 'noop', enabled: false },
+        { type: 'separator' },
+        { label: 'Open Uplink', action: 'open' },
+        { label: status.settings.paused ? 'Resume' : 'Pause', action: 'toggle-pause' },
+        { label: 'Check Claude sign-in', action: 'test-claude' },
+        { type: 'separator' },
+        { label: 'Quit Uplink', action: 'quit', shortcut: 'q' },
+      ]
+      const serialized = JSON.stringify(menu)
+      if (serialized !== lastMenu) {
+        craft.tray.setMenu(menu)
+        lastMenu = serialized
+      }
+    }
+
+    function place() {
+      // Under the menu bar at the right, where the status item lives. Craft
+      // has no popover anchored to the item. The bridge takes (x, y) as two
+      // numbers - an object silently became (100, 100) - and y is the window's
+      // top edge measured up from the bottom of the screen.
+      const width = 380
+      const x = Math.max(0, screen.width - width - 10)
+      const y = screen.height - (screen.availTop || 25) - 6
+      craft?.window?.setPosition?.(x, y)
+    }
+
+    let shown = false
+    function show() {
+      place()
+      craft?.window?.show?.()
+      // Take focus, so clicking elsewhere (blur) is what closes it.
+      craft?.window?.focus?.()
+      shown = true
+    }
+
+    async function refresh() {
+      try {
+        render(await api('/api/status'))
+      }
+      catch {
+        $('#headline').textContent = 'Uplink is not responding'
+      }
+    }
+
+    const actions = {
+      'open': () => show(),
+      'open-fda': () => api('/api/open/full-disk-access', {}),
+      'open-terminal': () => api('/api/open/terminal', {}),
+      'test-claude': () => api('/api/claude/test', {}).then(refresh),
+      'save-token': async () => {
+        const error = $('#token-error')
+        error.hidden = true
+        const result = await api('/api/token', { token: $('#token').value })
+        if (!result.ok) {
+          error.textContent = result.error || result.detail || 'That token did not work.'
+          error.hidden = false
+        }
+        else {
+          $('#token').value = ''
+        }
+        await refresh()
+      },
+      'save-allowed': async () => {
+        allowedEdited = false
+        render(await api('/api/settings', { allowed: $('#allowed').value.split('\n') }))
+      },
+      'toggle-pause': async () => render(await api('/api/settings', { paused: !current?.settings.paused })),
+      'quit': () => (craft?.app?.quit ? craft.app.quit() : api('/api/quit', {})),
+    }
+
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-action]')
+      if (!button)
+        return
+      button.disabled = true
+      Promise.resolve(actions[button.dataset.action]?.()).finally(() => { button.disabled = false })
+    })
+    $('#allowed').addEventListener('input', () => { allowedEdited = true })
+    $('#login').addEventListener('change', async event => render(await api('/api/settings', { openAtLogin: event.target.checked })))
+
+    if (craft?.tray) {
+      craft.tray.onClick(() => {
+        if (shown) {
+          craft.window.hide()
+          shown = false
+        }
+        else {
+          show()
+        }
+      })
+      craft.tray.onMenuAction((detail) => {
+        const action = typeof detail === 'string' ? detail : detail?.action
+        actions[action]?.()
+      })
+      craft.window?.onBlur?.(() => {
+        craft.window.hide()
+        shown = false
+      })
+    }
+
+    // Setup needs the person, so the popover opens itself until it is done.
+    refresh().then(() => {
+      if (current?.state === 'setup')
+        show()
+    })
+    setInterval(refresh, 2000)
+  </script>
+</body>
+</html>

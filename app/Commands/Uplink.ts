@@ -182,6 +182,48 @@ export default defineCommand((cli) => {
     })
 
   cli
+    .command('uplink:release', 'Build, sign and notarize Uplink.app, and publish it as a GitHub release')
+    .option('--identity <identity>', 'Developer ID Application certificate (name or SHA-1); default DESKTOP_SIGNING_IDENTITY')
+    .option('--notary-profile <profile>', 'notarytool keychain profile; default DESKTOP_NOTARY_PROFILE')
+    .option('--draft', 'Create the GitHub release as a draft', { default: false })
+    .action(async (options: { identity?: string, notaryProfile?: string, draft: boolean }) => {
+      const appDir = process.cwd()
+      const version = (await Bun.file(`${appDir}/package.json`).json()).version as string
+      const identity = options.identity || process.env.DESKTOP_SIGNING_IDENTITY
+      const notaryProfile = options.notaryProfile || process.env.DESKTOP_NOTARY_PROFILE
+      // A release other Macs open without a warning needs both. Refuse rather
+      // than publish something Gatekeeper will block.
+      if (!identity || !notaryProfile) {
+        console.error('A release needs a Developer ID identity and a notarytool profile: --identity and --notary-profile (or DESKTOP_SIGNING_IDENTITY / DESKTOP_NOTARY_PROFILE).')
+        process.exit(1)
+      }
+
+      const step = (args: string[], env: Record<string, string> = {}): void => {
+        console.log(`> ${args.join(' ')}`)
+        const result = Bun.spawnSync(args, { cwd: appDir, env: { ...process.env, ...env }, stdout: 'inherit', stderr: 'inherit' })
+        if (result.exitCode !== 0)
+          process.exit(result.exitCode ?? 1)
+      }
+
+      step(['./buddy', 'build:desktop'], { CRAFT_BIN: `${appDir}/pantry/.bin/craft` })
+      step(['./buddy', 'build:dmg'], {
+        DESKTOP_APP_NAME: 'Uplink',
+        DESKTOP_BUNDLE_ID: 'com.stacksjs.uplink',
+        DESKTOP_APP_VERSION: version,
+        DESKTOP_SIGNING_IDENTITY: identity,
+        DESKTOP_NOTARY_PROFILE: notaryProfile,
+      })
+
+      // One stable name, so https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg
+      // always serves the newest; the versioned copy keeps old releases findable.
+      const built = `${appDir}/storage/framework/desktop-dmg/Uplink-${version}.dmg`
+      const stable = `${appDir}/storage/framework/desktop-dmg/Uplink.dmg`
+      copyFileSync(built, stable)
+      step(['gh', 'release', 'create', `v${version}`, stable, built, '--title', `Uplink ${version}`, '--notes', `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.`, ...(options.draft ? ['--draft'] : [])])
+      process.exit(0)
+    })
+
+  cli
     .command('uplink:uninstall', 'Stop the background service and remove it from login')
     .action(async () => {
       await uninstall(servicePaths(process.cwd()))

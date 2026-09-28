@@ -11,6 +11,15 @@ import process from 'node:process'
 
 export const LABEL = 'com.stacksjs.uplink'
 
+/**
+ * The source build's bundle identity, distinct from the downloadable app's
+ * `com.stacksjs.uplink`. macOS keys Full Disk Access to a bundle id plus its
+ * signature, so when both builds shared one, launching the Developer ID app
+ * voided the grant made to this ad-hoc build. They still share the launchd
+ * LABEL, which is what stops both answering texts at once.
+ */
+export const BUNDLE_ID = 'com.stacksjs.uplink.source'
+
 export interface ServicePaths {
   appDir: string
   bundle: string
@@ -39,9 +48,9 @@ export function infoPlist(): string {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>${LABEL}</string>
-  <key>CFBundleName</key><string>Uplink</string>
-  <key>CFBundleDisplayName</key><string>Uplink</string>
+  <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
+  <key>CFBundleName</key><string>Uplink (source)</string>
+  <key>CFBundleDisplayName</key><string>Uplink (source)</string>
   <key>CFBundleExecutable</key><string>Uplink</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -108,7 +117,7 @@ export async function buildBundle(paths: ServicePaths): Promise<void> {
 
   // Ad-hoc signing gives the bundle a stable identity for TCC. Rebuilding
   // changes its hash, which is why install only rebuilds when asked.
-  await run(['codesign', '--force', '--sign', '-', '--identifier', LABEL, paths.bundle])
+  await run(['codesign', '--force', '--sign', '-', '--identifier', BUNDLE_ID, paths.bundle])
 }
 
 function domain(): string {

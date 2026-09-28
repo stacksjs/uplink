@@ -26,8 +26,10 @@ export function normalizeHandle(raw: string): string {
 export function parseHandleList(value: string | undefined | null): string[] {
   if (!value)
     return []
+  // Commas, semicolons and line breaks separate handles; spaces do not, since
+  // numbers are written with them: "(555) 123-4567", "+44 20 7946 0958".
   return value
-    .split(/[,\s]+/)
+    .split(/[,;\n]+/)
     .map(part => part.trim())
     .filter(Boolean)
     .map(normalizeHandle)
