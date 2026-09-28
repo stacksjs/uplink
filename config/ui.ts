@@ -43,7 +43,11 @@ export default {
   // subtrees to keep, e.g. `['errors', 'emails']`. Applies to `buddy dev` and
   // `buddy serve` alike, and to whatever the route manifest enumerates into
   // the sitemap.
-  defaultViews: true,
+  //
+  // Off: uplink.stacksjs.com is one page. With it on, production answered 200
+  // on /login, /register, /cart, /checkout/*, /orders/:id and an error tester,
+  // all posting to route bundles this app does not mount.
+  defaultViews: false,
 
   // What stx falls back to for a page that writes no title or description of
   // its own. Without these it is stx's own placeholders: "stx App" as the
