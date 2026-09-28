@@ -1,5 +1,5 @@
-import type { Engine, EngineEvent, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
-import type { ReplyTarget, Sender } from '../../../app/Uplink/sender'
+import type { Engine, EngineEvent, EngineProbe, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
+import type { AutomationState, ReplyTarget, Sender } from '../../../app/Uplink/sender'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -119,10 +119,20 @@ export class FakeChatDb {
 
 export class FakeSender implements Sender {
   sent: Array<{ target: ReplyTarget, text: string }> = []
+  /** Set to make every send fail, the way a refused Automation grant does. */
+  refuse: string | null = null
+  automation: AutomationState = { ok: true, reason: 'ok', detail: 'Uplink can send through Messages' }
+
   /** Mirror each send into chat.db, the way Messages records it. */
   constructor(private readonly db?: FakeChatDb) {}
 
+  async canSend(): Promise<AutomationState> {
+    return this.automation
+  }
+
   async send(target: ReplyTarget, text: string): Promise<void> {
+    if (this.refuse)
+      throw new Error(this.refuse)
     this.sent.push({ target, text })
     this.db?.add({ chat: target.handle, text, fromMe: true })
   }
@@ -148,10 +158,11 @@ export class FakeEngine implements Engine {
   readonly id = 'claude' as const
   readonly label = 'Claude Code'
   readonly authFailureHint = 'run "claude setup-token" on the Mac and give Uplink the token'
+  readonly install = { command: 'bun install -g @anthropic-ai/claude-code', url: 'https://docs.claude.com/en/docs/claude-code' }
 
-  probeResult: { ok: boolean, detail: string } = { ok: true, detail: 'Signed in' }
+  probeResult: EngineProbe = { ok: true, reason: 'ok', detail: 'Signed in' }
 
-  async probe(): Promise<{ ok: boolean, detail: string }> {
+  async probe(): Promise<EngineProbe> {
     this.probes += 1
     return this.probeResult
   }

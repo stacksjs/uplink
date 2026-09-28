@@ -1,11 +1,11 @@
 import type { Subprocess } from 'bun'
-import type { Engine, EngineProbe, EngineRequest, EngineResult, EngineRun } from './engine'
+import type { Engine, EngineInstall, EngineProbe, EngineRequest, EngineResult, EngineRun } from './engine'
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
-import { PROBE_TIMEOUT_MS } from './engine'
+import { binaryExists, PROBE_TIMEOUT_MS } from './engine'
 import { truncate } from './format'
 
 /**
@@ -60,6 +60,10 @@ export class CodexEngine implements Engine {
   readonly id = 'codex' as const
   readonly label = 'Codex'
   readonly authFailureHint = 'run "codex login" on the Mac (or "codex login --device-auth" over SSH)'
+  readonly install: EngineInstall = {
+    command: 'bun install -g @openai/codex',
+    url: 'https://developers.openai.com/codex/cli',
+  }
 
   constructor(private readonly options: CodexEngineOptions) {}
 
@@ -69,6 +73,9 @@ export class CodexEngine implements Engine {
    * can be checked as often as the UI likes.
    */
   async probe(): Promise<EngineProbe> {
+    if (!binaryExists(this.options.bin))
+      return { ok: false, reason: 'missing', detail: 'Codex is not installed on this Mac.' }
+
     try {
       const proc = Bun.spawn([this.options.bin, 'login', 'status'], {
         cwd: tmpdir(),
@@ -81,13 +88,15 @@ export class CodexEngine implements Engine {
       const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
       const exitCode = await proc.exited
       clearTimeout(timer)
+      // `codex login status` prints to stderr, not stdout, and exits 0 when
+      // signed in.
       const said = truncate((out.trim() || err.trim()) || 'Codex said nothing', 140)
-      return exitCode === 0
-        ? { ok: true, detail: said }
-        : { ok: false, detail: said === 'Codex said nothing' ? 'Not signed in yet.' : said }
+      if (exitCode === 0)
+        return { ok: true, reason: 'ok', detail: said }
+      return { ok: false, reason: 'signed-out', detail: said === 'Codex said nothing' ? 'Not signed in yet.' : said }
     }
-    catch {
-      return { ok: false, detail: `Could not run ${this.options.bin}. Is Codex installed?` }
+    catch (error) {
+      return { ok: false, reason: 'failed', detail: `Could not run ${this.options.bin}: ${error instanceof Error ? error.message : String(error)}` }
     }
   }
 

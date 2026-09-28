@@ -204,6 +204,18 @@
               <label for="engine" class="grow secondary">Answer texts with</label>
               <span id="engine-home"><select id="engine"></select></span>
             </div>
+            <!-- A missing CLI is not a sign-in problem, so its instructions
+                 replace the sign-in ones rather than sitting above them. -->
+            <div id="engine-missing" hidden>
+              <p><strong data-missing-label></strong> is not installed on this Mac. Uplink runs it for you, but it cannot install it.</p>
+              <input id="install-command" readonly spellcheck="false" aria-label="Install command">
+              <div class="buttons">
+                <button data-action="copy-install">Copy</button>
+                <button data-action="open-install-docs">Docs</button>
+                <span class="grow"></span>
+                <button class="default" data-action="test-engine">Check Again</button>
+              </div>
+            </div>
             <!-- Each CLI signs in its own way, so only the selected one's
                  instructions are shown. -->
             <div data-engine-only="claude">
@@ -233,6 +245,21 @@
             <div class="step-detail" data-detail></div>
           </div>
           <div class="step-body" data-body id="handles-home"></div>
+        </li>
+        <li class="step" id="step-automation">
+          <span class="mark" data-mark>4</span>
+          <div>
+            <div class="step-title">Let Uplink send replies</div>
+            <div class="step-detail" data-detail></div>
+          </div>
+          <div class="step-body" data-body>
+            <p>macOS asks once for permission to control Messages. Do it now, at the Mac: nobody can answer that prompt from a phone, and until it is answered a reply has nowhere to go.</p>
+            <div class="buttons">
+              <button data-action="open-automation">Open Privacy Settings</button>
+              <span class="grow"></span>
+              <button class="default" data-action="test-automation">Ask Now</button>
+            </div>
+          </div>
         </li>
       </ol>
     </section>
@@ -314,7 +341,7 @@
     }
 
     function renderSteps(status, byId) {
-      const steps = [['#step-fda', byId.fda], ['#step-engine', byId.engine], ['#step-handles', byId.handles]]
+      const steps = [['#step-fda', byId.fda], ['#step-engine', byId.engine], ['#step-handles', byId.handles], ['#step-automation', byId.automation]]
       const firstTodo = steps.findIndex(([, check]) => !check.ok)
       steps.forEach(([id, check], index) => {
         const el = $(id)
@@ -347,8 +374,17 @@
       if (document.activeElement !== picker)
         picker.value = selected
 
+      // Signing in is not possible until the CLI exists, so its instructions
+      // stand in for the sign-in ones.
+      const missing = check?.reason === 'missing'
+      $('#engine-missing').hidden = !missing
+      if (missing) {
+        $('[data-missing-label]').textContent = check?.label || selected
+        $('#install-command').value = check?.install?.command || ''
+      }
+
       for (const node of document.querySelectorAll('[data-engine-only]'))
-        node.hidden = node.dataset.engineOnly !== selected
+        node.hidden = missing || node.dataset.engineOnly !== selected
     }
 
     function whoText(status) {
@@ -529,6 +565,26 @@
         await api('/api/engine/test', {})
         await refresh()
       },
+      'copy-install': async () => {
+        const field = $('#install-command')
+        field.select()
+        // The webview can refuse the async clipboard API, so leave the command
+        // selected for the person to copy either way.
+        try {
+          await navigator.clipboard.writeText(field.value)
+        }
+        catch {}
+      },
+      'open-install-docs': () => api('/api/open/install-docs', {}),
+      // Raises the macOS prompt when it has never been answered, and re-reads
+      // the grant when it has.
+      'test-automation': async () => {
+        const detail = $('#step-automation [data-detail]')
+        detail.textContent = 'Checking'
+        await api('/api/automation/test', {})
+        await refresh()
+      },
+      'open-automation': () => api('/api/open/automation', {}),
       'save-token': async () => {
         const error = $('#token-error')
         error.hidden = true

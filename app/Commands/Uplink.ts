@@ -30,7 +30,7 @@ async function openMessages(config: ReturnType<typeof loadConfig>, appDir: strin
     catch (error) {
       const message = error instanceof MessagesAccessError ? error.message : String(error)
       console.error(`[uplink] ${message} Retrying in ${RETRY_OPEN_MS / 1000}s.`)
-      await writeHeartbeat(appDir, { pid: process.pid, startedAt, lastPollAt: null, lastError: message, allowed: config.allowed, own: [], active: [] })
+      await writeHeartbeat(appDir, { pid: process.pid, startedAt, lastPollAt: null, lastError: message, automation: null, lastSendError: null, allowed: config.allowed, own: [], active: [] })
       await Bun.sleep(RETRY_OPEN_MS)
     }
   }
@@ -73,24 +73,39 @@ export default defineCommand((cli) => {
       keepMessagesOpen()
 
       const messages = await openMessages(config, appDir, startedAt)
+      const sender = new AppleScriptSender()
       const uplink = new Uplink({
         config,
         messages,
-        sender: new AppleScriptSender(),
+        sender,
         engine: selectedEngine(config),
         store: new ModelStore(`${appDir}/storage/uplink/cursor`),
       })
       await uplink.start()
 
-      const beat = (): Promise<number> => writeHeartbeat(appDir, {
-        pid: process.pid,
-        startedAt,
-        lastPollAt: uplink.lastPollAt,
-        lastError: uplink.lastError,
-        allowed: uplink.allowedHandles,
-        own: uplink.ownHandles,
-        active: uplink.activeRuns,
-      })
+      // The Automation grant is per app, so only this process can prove that
+      // Uplink.app may drive Messages. Ask once at start, and again whenever a
+      // send has failed, so the doctor and the dashboard report the subject
+      // that actually sends rather than whichever terminal ran them.
+      let automation = await sender.canSend()
+      if (!automation.ok)
+        console.error(`[uplink] cannot send through Messages: ${automation.detail}`)
+
+      const beat = async (): Promise<number> => {
+        if (uplink.lastSendError && automation.ok)
+          automation = await sender.canSend()
+        return writeHeartbeat(appDir, {
+          pid: process.pid,
+          startedAt,
+          lastPollAt: uplink.lastPollAt,
+          lastError: uplink.lastError,
+          automation: { ok: automation.ok, detail: automation.detail },
+          lastSendError: uplink.lastSendError,
+          allowed: uplink.allowedHandles,
+          own: uplink.ownHandles,
+          active: uplink.activeRuns,
+        })
+      }
       // .env is read once, at start. Editing it (a new token, say) used to do
       // nothing until someone remembered uplink:restart, and every text in
       // between failed. Under launchd, which restarts us, pick it up on our

@@ -1,6 +1,8 @@
 /* eslint-disable no-console */
 import type { Server } from 'bun'
 import type { UplinkConfig } from './config'
+import type { EngineId, EngineInstall, EngineProbe, ProbeReason } from './engine'
+import type { AutomationState } from './sender'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -41,7 +43,25 @@ const LOCK_PATH = join(DATA_DIR, 'uplink.pid')
 const LAUNCH_AGENT = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
 const RETRY_OPEN_MS = 5_000
 
-type EngineState = { ok: boolean, detail: string, checkedAt: number }
+type EngineState = EngineProbe & { checkedAt: number }
+
+/**
+ * One row of the popover's setup list. Declared rather than inferred, because
+ * the entries genuinely differ (only an engine row carries `install`) and an
+ * inferred union puts the shared fields out of reach.
+ */
+interface PopoverCheck {
+  id: string
+  name: string
+  ok: boolean
+  detail: string
+  /** Shown, but not counted towards readiness. */
+  informational: boolean
+  engineId?: EngineId
+  label?: string
+  reason?: ProbeReason
+  install?: EngineInstall
+}
 
 export interface DesktopAgent {
   port: number
@@ -142,6 +162,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   if (settings.openAtLogin && (!existsSync(LAUNCH_AGENT) || !readFileSync(LAUNCH_AGENT, 'utf8').includes(`<string>${process.execPath}</string>`)))
     setOpenAtLogin(true)
 
+  const sender = new AppleScriptSender()
   const store = new SqliteStore(DATABASE_PATH)
   const startedAt = Date.now()
   let messages: MessagesDb | null = null
@@ -150,6 +171,17 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   let knownAllowed: string[] = []
   const engines = new Map<string, EngineState>()
   let checkingEngines = false
+  let automation: AutomationState | null = null
+
+  /**
+   * Whether macOS will let this app drive Messages. This process is Uplink.app,
+   * so unlike `buddy uplink:doctor` under Terminal it is the right subject to
+   * ask. The first call raises the prompt, which is why setup calls it rather
+   * than leaving it to the first real reply.
+   */
+  const checkAutomation = async (): Promise<void> => {
+    automation = await sender.canSend()
+  }
 
   /**
    * Probe every engine, not only the selected one: the popover shows the other
@@ -180,7 +212,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       messagesError = error instanceof MessagesAccessError ? 'Uplink needs Full Disk Access to read Messages.' : String(error)
       return
     }
-    uplink = new Uplink({ config, messages, sender: new AppleScriptSender(), engine: selectedEngine(config), store })
+    uplink = new Uplink({ config, messages, sender, engine: selectedEngine(config), store })
     await uplink.start()
   }
 
@@ -200,10 +232,16 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   const keepMessagesOpen = setInterval(() => {
     if (uplink && Bun.spawnSync(['pgrep', '-x', 'Messages']).exitCode !== 0)
       Bun.spawnSync(['open', '-g', '-a', 'Messages'])
+    // Re-ask while the answer is anything but yes. A refusal only changes in
+    // System Settings, and a timeout from a Messages that was still starting
+    // should not leave the app stuck in setup for ever.
+    if (!automation?.ok)
+      void checkAutomation()
   }, 15_000)
 
   await startWatching()
   void checkEngines()
+  void checkAutomation()
 
   const status = () => {
     const recent = store.recentRuns(8).map(run => ({
@@ -223,7 +261,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     if (uplink)
       knownAllowed = uplink.allowedHandles
     const allowed = uplink ? knownAllowed : settings.allowed.length > 0 ? settings.allowed : knownAllowed
-    const checks = [
+    const checks: PopoverCheck[] = [
       {
         id: 'fda',
         name: 'Read Messages',
@@ -234,13 +272,19 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       ...allEngines(config).map((engine) => {
         const state = engines.get(engine.id)
         const selected = engine.id === config.engine
+        const reason = state?.reason ?? 'failed'
+        const missing = reason === 'missing'
         return {
           // `engine` is the selected one, and the popover draws its sign-in
           // step. The other is listed so switching is discoverable.
           id: selected ? 'engine' : `engine:${engine.id}`,
-          name: selected ? `Sign in to ${engine.label}` : engine.label,
+          // A missing CLI is not a sign-in problem, and calling it one sends
+          // the person to run a command that does not exist either.
+          name: missing ? `Install ${engine.label}` : selected ? `Sign in to ${engine.label}` : engine.label,
           engineId: engine.id,
           label: engine.label,
+          reason,
+          install: engine.install,
           ok: state?.ok ?? false,
           detail: checkingEngines && !state ? 'Checking' : (state?.detail ?? 'Not checked yet'),
           informational: !selected,
@@ -251,6 +295,16 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         name: 'Who can text it',
         ok: allowed.length > 0,
         detail: allowed.length > 0 ? allowed.join(', ') : 'No handles yet. Sign in to Messages, or add your number.',
+        informational: false,
+      },
+      {
+        // The outbound half of the chain. Without this the app reported itself
+        // ready while every reply was refused, so a first text produced a run
+        // marked done and a phone that heard nothing.
+        id: 'automation',
+        name: 'Send replies',
+        ok: automation?.ok ?? false,
+        detail: uplink?.lastSendError ?? automation?.detail ?? 'Not checked yet',
         informational: false,
       },
     ]
@@ -304,6 +358,24 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         case '/api/open/full-disk-access':
           Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'])
           return json({ ok: true })
+
+        case '/api/automation/test':
+          await checkAutomation()
+          return json(automation)
+
+        case '/api/open/automation': {
+          Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'])
+          return json({ ok: true })
+        }
+
+        case '/api/open/install-docs': {
+          // The selected engine's own documentation, so the link cannot drift
+          // from the command shown beside it.
+          const { url } = allEngines(config).find(engine => engine.id === config.engine)?.install ?? { url: '' }
+          if (url)
+            Bun.spawnSync(['open', url])
+          return json({ ok: Boolean(url), url })
+        }
 
         case '/api/open/terminal': {
           // Both sign-ins need a real terminal for their browser round trip.

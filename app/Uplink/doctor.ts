@@ -1,5 +1,5 @@
 import type { UplinkConfig } from './config'
-import type { Engine } from './engine'
+import type { Engine, ProbeReason } from './engine'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { allEngines } from './engines'
@@ -35,6 +35,10 @@ export interface Heartbeat {
   startedAt: number
   lastPollAt: number | null
   lastError: string | null
+  /** Whether the watcher itself can drive Messages. Null before it has asked. */
+  automation: { ok: boolean, detail: string } | null
+  /** Why the last reply could not be delivered, if one could not. */
+  lastSendError: string | null
   allowed: string[]
   own: string[]
   active: Array<{ prompt: string, startedAt: number, lastActivity: string | null, queued: number }>
@@ -61,14 +65,23 @@ export async function readHeartbeat(appDir: string): Promise<Heartbeat | null> {
 const HEARTBEAT_STALE_MS = 2 * 60_000
 
 /**
- * What to do about an engine that cannot answer. The engine's own
- * `authFailureHint` is written for a text message, so it names the CLI and the
- * command but not the surrounding `.env` step this install needs.
+ * What to do about an engine that cannot answer, which depends on why.
+ *
+ * A missing CLI used to be reported inside the sign-in step, so the person was
+ * told to run a command that does not exist either. These are three problems
+ * with three different next steps.
  */
-function engineFix(engine: Engine): string {
-  return engine.id === 'claude'
-    ? 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart'
-    : 'Run codex login (or codex login --device-auth if you are on SSH), then ./buddy uplink:restart'
+function engineFix(engine: Engine, reason: ProbeReason): string {
+  if (reason === 'missing')
+    return `Install it: ${engine.install.command} (see ${engine.install.url}), then ./buddy uplink:restart`
+
+  if (reason === 'signed-out') {
+    return engine.id === 'claude'
+      ? 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart'
+      : 'Run codex login (or codex login --device-auth if you are on SSH), then ./buddy uplink:restart'
+  }
+
+  return `${engine.label} is installed and signed in, but did not answer. The detail above is what it said.`
 }
 
 export async function runChecks(config: UplinkConfig, appDir: string): Promise<Check[]> {
@@ -119,16 +132,20 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
   for (const engine of allEngines(config)) {
     const selected = engine.id === config.engine
     const probe = await engine.probe()
+    const name = probe.reason === 'missing'
+      ? `${engine.label} (not installed)`
+      : selected ? `${engine.label} account` : `${engine.label} (available, not selected)`
+
     checks.push({
-      name: selected ? `${engine.label} account` : `${engine.label} (available, not selected)`,
+      name,
       ok: probe.ok,
       detail: probe.detail,
       informational: !selected,
       fix: probe.ok
         ? undefined
         : selected
-          ? engineFix(engine)
-          : `Optional. To use it, set UPLINK_ENGINE=${engine.id} in .env, then: ${engineFix(engine)}`,
+          ? engineFix(engine, probe.reason)
+          : `Optional. To use it, set UPLINK_ENGINE=${engine.id} in .env, then: ${engineFix(engine, probe.reason)}`,
     })
   }
 
@@ -137,7 +154,28 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
     ? { name: 'Messages app', ok: true, detail: 'running' }
     : { name: 'Messages app', ok: false, detail: 'not running', fix: 'Open Messages and sign in with your Apple ID' })
 
-  checks.push({ name: 'Sending replies', ok: true, detail: 'macOS asks once, on the first reply, to let Uplink control Messages - click Allow' })
+  // The Automation grant is per app: the watcher inside Uplink.app and this
+  // command under Terminal are different subjects. Only the watcher's answer is
+  // about the thing that will actually send, so ask the heartbeat rather than
+  // measuring this process and reporting it as Uplink's.
+  if (fresh && heartbeat.automation) {
+    checks.push(heartbeat.automation.ok
+      ? { name: 'Sending replies', ok: true, detail: heartbeat.automation.detail }
+      : {
+          name: 'Sending replies',
+          ok: false,
+          detail: heartbeat.lastSendError ?? heartbeat.automation.detail,
+          fix: `Allow ${paths.bundle} to control Messages in System Settings > Privacy & Security > Automation, then ./buddy uplink:restart. macOS asks once; if it was declined, the switch is in that pane.`,
+        })
+  }
+  else {
+    checks.push({
+      name: 'Sending replies',
+      ok: false,
+      detail: 'not checked: the watcher is not running, and only it can prove Uplink.app may control Messages',
+      fix: 'Start it with ./buddy uplink:install, then run this again',
+    })
+  }
 
   return checks
 }
