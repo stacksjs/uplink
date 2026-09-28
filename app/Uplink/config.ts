@@ -109,6 +109,10 @@ function findClaude(): string {
   for (const candidate of [
     join(homedir(), '.local', 'bin', 'claude'),
     join(homedir(), '.claude', 'local', 'claude'),
+    // `bun install -g` and an npm global prefix, both of which the PATH the
+    // launchers build also covers.
+    join(homedir(), '.bun', 'bin', 'claude'),
+    join(homedir(), '.npm-global', 'bin', 'claude'),
     '/opt/homebrew/bin/claude',
     '/usr/local/bin/claude',
   ]) {

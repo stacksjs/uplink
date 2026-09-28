@@ -16,25 +16,15 @@
  */
 import { join } from 'node:path'
 import process from 'node:process'
+import { agentPath } from './agent-path'
 
 declare const UPLINK_APP_DIR: string
 
 const appDir = process.env.UPLINK_APP_DIR || UPLINK_APP_DIR
-const home = process.env.HOME ?? ''
 
-// launchd hands agents a bare PATH; the watcher shells out to claude, git and osascript.
-const PATH = [
-  join(appDir, 'pantry', '.bin'),
-  join(home, '.local', 'bin'),
-  join(home, '.bun', 'bin'),
-  '/opt/homebrew/bin',
-  '/usr/local/bin',
-  '/usr/bin',
-  '/bin',
-  '/usr/sbin',
-  '/sbin',
-  process.env.PATH ?? '',
-].filter(Boolean).join(':')
+// launchd hands agents a bare PATH; the watcher shells out to claude, codex,
+// git and osascript.
+const PATH = agentPath({ appDir })
 
 const watcher = Bun.spawn([join(appDir, 'buddy'), 'uplink:watch'], {
   cwd: appDir,
