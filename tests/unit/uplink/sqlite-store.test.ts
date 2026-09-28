@@ -1,12 +1,13 @@
 import type { UplinkConfig } from '../../../app/Uplink/config'
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadConfig } from '../../../app/Uplink/config'
 import { MessagesDb } from '../../../app/Uplink/messages-db'
 import { cleanToken, readSettings, settingsEnv, tokenLooksValid, writeSettings } from '../../../app/Uplink/settings'
-import { SqliteStore } from '../../../app/Uplink/sqlite-store'
+import { migrate, schemaVersion, SqliteStore, TABLES } from '../../../app/Uplink/sqlite-store'
 import { Uplink } from '../../../app/Uplink/uplink'
 import { FakeChatDb, FakeEngine, FakeSender, ME, settle } from './fixtures'
 
@@ -61,6 +62,154 @@ describe('SqliteStore', () => {
     expect(store.recentRuns().map(run => run.status)).toEqual(['running', 'done'])
     store.close()
     fake.close()
+  })
+})
+
+/**
+ * The shape Uplink 0.1.3 wrote, which is what is on every Mac that already
+ * runs it. Frozen on purpose: it is the oldest database a new build has to
+ * open, so it is the thing an upgrade has to be proved against.
+ */
+const SHIPPED = {
+  state: 'key TEXT PRIMARY KEY, value TEXT NOT NULL',
+  conversations: 'chat_guid TEXT PRIMARY KEY, handle TEXT NOT NULL, service TEXT NOT NULL DEFAULT \'iMessage\', session_id TEXT, cwd TEXT, last_active_at INTEGER, more_text TEXT',
+  runs: 'id INTEGER PRIMARY KEY AUTOINCREMENT, chat_guid TEXT NOT NULL, message_guid TEXT NOT NULL, prompt TEXT NOT NULL, cwd TEXT, status TEXT NOT NULL DEFAULT \'queued\', reply TEXT, error TEXT, session_id TEXT, cost_cents INTEGER, duration_ms INTEGER, last_activity TEXT, started_at INTEGER, finished_at INTEGER',
+}
+
+function write(path: string, tables: Record<string, string>): void {
+  const db = new Database(path, { create: true })
+  for (const [name, columns] of Object.entries(tables))
+    db.run(`CREATE TABLE ${name} (${columns})`)
+  db.close()
+}
+
+function columnsOf(path: string, table: string): string[] {
+  const db = new Database(path)
+  const names = (db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(column => column.name)
+  db.close()
+  return names
+}
+
+describe('SqliteStore migrations', () => {
+  it('creates a database that is already current', () => {
+    const path = join(tempDir(), 'uplink.sqlite')
+    const store = new SqliteStore(path)
+    expect(store.schemaError).toBeNull()
+    store.close()
+
+    for (const table of TABLES)
+      expect(columnsOf(path, table.name)).toEqual(Object.keys(table.columns))
+
+    const db = new Database(path)
+    expect(schemaVersion(db)).toBeGreaterThan(0)
+    db.close()
+  })
+
+  /**
+   * The bug this exists for. `CREATE TABLE IF NOT EXISTS` is a no-op against a
+   * database that is already there, so before this every column added to the
+   * schema was a column an installed copy would never get, and its first INSERT
+   * after the update would fail. Here `runs` is missing the four columns a
+   * newer build names and `conversations` is missing entirely.
+   */
+  it('adds what an installed database is missing, without losing its rows', async () => {
+    const path = join(tempDir(), 'uplink.sqlite')
+    write(path, {
+      state: SHIPPED.state,
+      runs: 'id INTEGER PRIMARY KEY AUTOINCREMENT, chat_guid TEXT NOT NULL, message_guid TEXT NOT NULL, prompt TEXT NOT NULL, cwd TEXT, status TEXT NOT NULL DEFAULT \'queued\', reply TEXT, error TEXT, session_id TEXT, cost_cents INTEGER',
+    })
+    const older = new Database(path)
+    older.run('INSERT INTO runs (chat_guid, message_guid, prompt, cwd, status, reply) VALUES (?, ?, ?, ?, ?, ?)', ['g', 'm', 'answered before the update', '/tmp', 'done', 'hi'])
+    older.close()
+
+    const store = new SqliteStore(path)
+    expect(store.schemaError).toBeNull()
+
+    // The history it already had is still there.
+    expect(store.recentRuns()[0]).toMatchObject({ prompt: 'answered before the update', status: 'done', reply: 'hi' })
+
+    // And the columns it did not have are usable, which is the INSERT that
+    // used to fail on every text.
+    const id = await store.createRun({ chatGuid: 'g', messageGuid: 'm2', prompt: 'after', cwd: '/tmp', status: 'queued' })
+    await store.updateRun(id, { status: 'done', durationMs: 7, lastActivity: 'Thinking', startedAt: 1, finishedAt: 8 })
+    expect(store.recentRuns()[0]).toMatchObject({ id, durationMs: 7, lastActivity: 'Thinking', startedAt: 1, finishedAt: 8 })
+
+    // A table that did not exist at all is created rather than altered.
+    await store.saveConversation({ chatGuid: 'g', handle: ME, service: 'iMessage', sessionId: 's', cwd: '/tmp', lastActiveAt: 5, moreText: null })
+    expect(await store.conversation('g')).toMatchObject({ sessionId: 's' })
+    store.close()
+  })
+
+  /**
+   * The guard that makes the mechanism worth having. SQLite will not ALTER in
+   * a PRIMARY KEY or UNIQUE column at all, and refuses a NOT NULL column with
+   * no default, or a non-constant default, **once the table has rows**. A
+   * column written any of those ways reaches every new install and no existing
+   * one, which is the failure this whole file is about, one level up.
+   *
+   * The rows are the point. On an empty table SQLite 3.51 accepts both
+   * `NOT NULL` with no default and `DEFAULT (datetime())`, so a version of
+   * this test that migrated an empty 0.1.3 database would pass while every
+   * real Mac, which has a history, failed.
+   *
+   * It passes trivially while the schema is unchanged and fails the day
+   * someone adds a column that could not travel.
+   */
+  it('can add every column to a shipped database that is already in use', () => {
+    const path = join(tempDir(), 'uplink.sqlite')
+    write(path, SHIPPED)
+    const used = new Database(path)
+    used.run('INSERT INTO state (key, value) VALUES (?, ?)', ['cursor', '1'])
+    used.run('INSERT INTO conversations (chat_guid, handle) VALUES (?, ?)', ['g', ME])
+    used.run('INSERT INTO runs (chat_guid, message_guid, prompt) VALUES (?, ?, ?)', ['g', 'm', 'p'])
+    used.close()
+
+    const store = new SqliteStore(path)
+    expect(store.schemaError).toBeNull()
+    store.close()
+
+    for (const table of TABLES)
+      expect(columnsOf(path, table.name)).toEqual(Object.keys(table.columns))
+  })
+
+  it('runs twice over the same database without changing it', () => {
+    const path = join(tempDir(), 'uplink.sqlite')
+    new SqliteStore(path).close()
+    const after = TABLES.map(table => columnsOf(path, table.name))
+    new SqliteStore(path).close()
+    expect(TABLES.map(table => columnsOf(path, table.name))).toEqual(after)
+  })
+
+  /**
+   * The store is built at the top of the desktop agent, under launchd, so a
+   * throw here is a restart loop with no menubar to explain it. A ruined file
+   * costs the history, not the app.
+   */
+  it('keeps answering texts when the file cannot be opened', async () => {
+    const path = join(tempDir(), 'uplink.sqlite')
+    writeFileSync(path, 'this is not a database')
+
+    const store = new SqliteStore(path)
+    expect(store.schemaError).toContain('not a database')
+    expect(store.schemaError).toContain('not saving them')
+
+    const id = await store.createRun({ chatGuid: 'g', messageGuid: 'm', prompt: 'still works', cwd: '/tmp', status: 'queued' })
+    expect(store.recentRuns()[0]).toMatchObject({ id, prompt: 'still works' })
+    store.close()
+  })
+
+  it('leaves a half-applied change out of the database entirely', () => {
+    const db = new Database(':memory:')
+    db.run('CREATE TABLE runs (id INTEGER PRIMARY KEY)')
+    // UNIQUE is one SQLite never allows in an ALTER, so this stands in for a
+    // migration that fails partway: the table before it was created first.
+    expect(() => migrate(db, [
+      { name: 'created_first', columns: { a: 'TEXT' } },
+      { name: 'runs', columns: { id: 'INTEGER PRIMARY KEY', nope: 'TEXT UNIQUE' } },
+    ])).toThrow()
+    expect(db.query('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toEqual([{ name: 'runs' }])
+    expect(schemaVersion(db)).toBe(0)
+    db.close()
   })
 })
 

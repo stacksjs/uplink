@@ -5,46 +5,91 @@ import { dirname } from 'node:path'
 
 /**
  * The store the downloadable app uses: one SQLite file in
- * ~/Library/Application Support/Uplink, no framework, no migrations to run.
+ * ~/Library/Application Support/Uplink, no framework and no migration runner.
  *
  * The Stacks app keeps its model-backed store (`model-store.ts`), whose tables
  * the dashboard reads. This one exists because a downloaded Uplink.app has no
  * Stacks project around it. Column names and units match the models - cost is
  * integer cents - so the two stay describable in one sentence.
+ *
+ * `CREATE TABLE IF NOT EXISTS` does nothing on a Mac that already has the
+ * file, so a column added to a schema string would never reach an installed
+ * copy: the first text after the update would fail on the INSERT, for every
+ * existing user, on every message. That is why the tables are described as
+ * data below rather than as one block of SQL. The same description creates a
+ * new database and tells an old one which columns it is missing, so adding a
+ * column means editing `TABLES`, and there is no second place to forget.
  */
 
 export interface RunRow extends RunRecord {
   id: number
 }
 
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS conversations (
-    chat_guid TEXT PRIMARY KEY,
-    handle TEXT NOT NULL,
-    service TEXT NOT NULL DEFAULT 'iMessage',
-    session_id TEXT,
-    cwd TEXT,
-    last_active_at INTEGER,
-    more_text TEXT
-  );
-  CREATE TABLE IF NOT EXISTS runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_guid TEXT NOT NULL,
-    message_guid TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    cwd TEXT,
-    status TEXT NOT NULL DEFAULT 'queued',
-    reply TEXT,
-    error TEXT,
-    session_id TEXT,
-    cost_cents INTEGER,
-    duration_ms INTEGER,
-    last_activity TEXT,
-    started_at INTEGER,
-    finished_at INTEGER
-  );
-`
+/**
+ * Stamped into `PRAGMA user_version`. Nothing branches on it today: the
+ * columns themselves are reconciled. It is recorded so a database can say how
+ * old it is, and so the day a change needs more than a new column - a backfill,
+ * a rename - has a version to key off.
+ */
+const SCHEMA_VERSION = 1
+
+export interface TableSpec {
+  name: string
+  /**
+   * Definitions in creation order. A column added here later is also added to
+   * databases that already exist, so it has to be one SQLite can ALTER in:
+   * nullable or carrying a constant default, and never PRIMARY KEY or UNIQUE.
+   *
+   * Worth knowing before trusting a green test: SQLite only enforces the
+   * NOT NULL and constant-default halves once a table has rows. An empty one
+   * accepts both. So a new column can pass on a fresh database and fail on
+   * every Mac that has been running, which is this file's own bug wearing a
+   * different hat. `tests/unit/uplink/sqlite-store.test.ts` migrates a
+   * populated database for that reason.
+   */
+  columns: Record<string, string>
+}
+
+export const TABLES: TableSpec[] = [
+  {
+    name: 'state',
+    columns: {
+      key: 'TEXT PRIMARY KEY',
+      value: 'TEXT NOT NULL',
+    },
+  },
+  {
+    name: 'conversations',
+    columns: {
+      chat_guid: 'TEXT PRIMARY KEY',
+      handle: 'TEXT NOT NULL',
+      service: 'TEXT NOT NULL DEFAULT \'iMessage\'',
+      session_id: 'TEXT',
+      cwd: 'TEXT',
+      last_active_at: 'INTEGER',
+      more_text: 'TEXT',
+    },
+  },
+  {
+    name: 'runs',
+    columns: {
+      id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+      chat_guid: 'TEXT NOT NULL',
+      message_guid: 'TEXT NOT NULL',
+      prompt: 'TEXT NOT NULL',
+      cwd: 'TEXT',
+      status: 'TEXT NOT NULL DEFAULT \'queued\'',
+      reply: 'TEXT',
+      error: 'TEXT',
+      session_id: 'TEXT',
+      cost_cents: 'INTEGER',
+      duration_ms: 'INTEGER',
+      last_activity: 'TEXT',
+      started_at: 'INTEGER',
+      finished_at: 'INTEGER',
+    },
+  },
+]
 
 const RUN_COLUMNS: Record<keyof RunRecord, string> = {
   chatGuid: 'chat_guid',
@@ -62,14 +107,67 @@ const RUN_COLUMNS: Record<keyof RunRecord, string> = {
   finishedAt: 'finished_at',
 }
 
+/**
+ * Bring a database up to the shape `TABLES` describes: create the tables it
+ * does not have, and add to the ones it does any column it is missing.
+ *
+ * Forward only, and idempotent, so it runs on every start and costs one
+ * `PRAGMA table_info` per table once a database is current. The whole thing is
+ * one transaction, which in SQLite covers the `ALTER TABLE`s and the version
+ * stamp together: a database is either fully updated or untouched, never left
+ * halfway by a Mac that went to sleep.
+ */
+export function migrate(db: Database, tables: TableSpec[] = TABLES): void {
+  db.transaction(() => {
+    for (const table of tables) {
+      // Empty means the table does not exist, which is also how a brand new
+      // file answers, so one query covers both cases.
+      const present = new Set((db.query(`PRAGMA table_info(${table.name})`).all() as Array<{ name: string }>)
+        .map(column => column.name))
+      const columns = Object.entries(table.columns)
+
+      if (present.size === 0) {
+        db.run(`CREATE TABLE ${table.name} (${columns.map(([name, definition]) => `${name} ${definition}`).join(', ')})`)
+        continue
+      }
+      for (const [name, definition] of columns) {
+        if (!present.has(name))
+          db.run(`ALTER TABLE ${table.name} ADD COLUMN ${name} ${definition}`)
+      }
+    }
+    // Interpolated, not bound: PRAGMA takes no parameter.
+    db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+  })()
+}
+
+export function schemaVersion(db: Database): number {
+  return (db.query('PRAGMA user_version').get() as { user_version: number }).user_version
+}
+
 export class SqliteStore implements Store {
   private db: Database
 
+  /**
+   * Why this Uplink is running without its database, if it is.
+   *
+   * The store is built at the top of the desktop agent, under launchd, where
+   * an uncaught throw is a restart loop and the menubar never appears to say
+   * why. A corrupt file, a full disk or a migration SQLite refuses would all
+   * end there. Answering texts without remembering them is worth more than an
+   * app that is not running, so the file is abandoned for an in-memory
+   * database and the popover explains it.
+   */
+  readonly schemaError: string | null = null
+
   constructor(path: string) {
-    mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path, { create: true })
-    this.db.exec('PRAGMA journal_mode = WAL;')
-    this.db.exec(SCHEMA)
+    try {
+      mkdirSync(dirname(path), { recursive: true })
+      this.db = open(path)
+    }
+    catch (error) {
+      this.schemaError = `${message(error)}. Uplink is answering texts but not saving them.`
+      this.db = open(':memory:')
+    }
   }
 
   close(): void {
@@ -146,4 +244,23 @@ export class SqliteStore implements Store {
       finishedAt: row.finished_at,
     }))
   }
+}
+
+function open(path: string): Database {
+  const db = new Database(path, { create: true })
+  try {
+    // A second Uplink reading the same file is the normal case during an
+    // update, and WAL is what lets it read while this one writes.
+    db.exec('PRAGMA journal_mode = WAL;')
+    migrate(db)
+    return db
+  }
+  catch (error) {
+    db.close()
+    throw error
+  }
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

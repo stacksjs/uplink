@@ -168,6 +168,10 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
 
   const sender = new AppleScriptSender()
   const store = new SqliteStore(DATABASE_PATH)
+  // A database this app cannot open no longer takes the app with it, so the
+  // one thing that must not happen is it going unmentioned.
+  if (store.schemaError)
+    console.error(`[uplink] ${store.schemaError}`)
   const startedAt = Date.now()
   let messages: MessagesDb | null = null
   let messagesError: string | null = null
@@ -473,6 +477,19 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
             : automation?.detail ?? 'Uplink asks for this once the steps above are done.'),
         informational: false,
       },
+      // Only when there is something to say. An intact database is not a step
+      // anyone performs, and a broken one is not a reason to call the app
+      // unready: it is still reading texts and still answering them, it just
+      // will not remember any of it. See `SqliteStore.schemaError`.
+      ...(store.schemaError
+        ? [{
+            id: 'database',
+            name: 'History',
+            ok: false,
+            detail: store.schemaError,
+            informational: true,
+          }]
+        : []),
     ]
     // An engine the person has not selected must not hold the app in setup.
     const ready = checks.every(check => check.ok || check.informational)
