@@ -1,3 +1,4 @@
+import { watch } from 'node:fs'
 import process from 'node:process'
 import { defineCommand } from '@stacksjs/cli'
 import { loadConfig, systemPrompt } from '../Uplink/config'
@@ -7,7 +8,7 @@ import { formatDuration, toPlainText } from '../Uplink/format'
 import { MessagesAccessError, MessagesDb } from '../Uplink/messages-db'
 import { ModelStore } from '../Uplink/model-store'
 import { AppleScriptSender } from '../Uplink/sender'
-import { install, restart, servicePaths, uninstall } from '../Uplink/service'
+import { install, LABEL, restart, servicePaths, uninstall } from '../Uplink/service'
 import { Uplink } from '../Uplink/uplink'
 import { detectWorkdir } from '../Uplink/workdir'
 
@@ -80,10 +81,27 @@ export default defineCommand((cli) => {
         own: uplink.ownHandles,
         active: uplink.activeRuns,
       })
+      // .env is read once, at start. Editing it (a new token, say) used to do
+      // nothing until someone remembered uplink:restart, and every text in
+      // between failed. Under launchd, which restarts us, pick it up on our
+      // own - but never in the middle of a run.
+      let envChanged = false
+      if (process.env.XPC_SERVICE_NAME === LABEL) {
+        watch(`${appDir}/.env`, () => {
+          if (!envChanged)
+            console.log('[uplink] .env changed; restarting once no run is in progress')
+          envChanged = true
+        })
+      }
+
       await beat()
-      setInterval(() => {
+      setInterval(async () => {
         keepMessagesOpen()
-        void beat()
+        await beat()
+        if (envChanged && uplink.activeRuns.length === 0) {
+          await uplink.stop()
+          process.exit(0)
+        }
       }, HEARTBEAT_MS)
 
       const shutdown = async (): Promise<void> => {

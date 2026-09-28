@@ -86,13 +86,13 @@ this Mac into it, and set `UPLINK_ALLOWED` to your own phone number.
 |---|---|
 | `./buddy uplink:install [--rebuild]` | Build Uplink.app and start it at login. `--rebuild` recompiles it, which voids its Full Disk Access grant |
 | `./buddy uplink:doctor` | Check every requirement and say how to fix what is missing |
-| `./buddy uplink:restart` | Restart after changing `.env` or granting a permission |
+| `./buddy uplink:restart` | Restart now, e.g. after granting a permission. Editing `.env` restarts it on its own once no run is in progress |
 | `./buddy uplink:uninstall` | Stop it and remove it from login |
 | `./buddy uplink:ask "<prompt>"` | Run one prompt exactly as a text would, without Messages |
 | `./buddy uplink:watch` | The watcher itself, in the foreground (needs Full Disk Access for your terminal) |
 | `./buddy dev` | The dashboard: setup status, what it is doing, recent texts |
 
-Configuration lives in `.env`; see the `UPLINK_*` block in `.env.example`.
+Configuration lives in `.env`; see the `UPLINK_*` block in `.env.example`. The service picks up edits by itself.
 
 ## Layout
 
