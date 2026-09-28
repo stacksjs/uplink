@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'bun:test'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SignIn, tokenFromOutput } from '../../../app/Uplink/sign-in'
+import { lastWords, renderScreen, SignIn, tokenFromOutput } from '../../../app/Uplink/sign-in'
 
 const TOKEN = `sk-ant-oat01-${'Ab3_-'.repeat(19)}`
 const dir = mkdtempSync(join(tmpdir(), 'uplink-signin-'))
@@ -20,25 +20,42 @@ async function settle(signIn: SignIn): Promise<void> {
     await Bun.sleep(25)
 }
 
+describe('renderScreen', () => {
+  it('keeps a character the interface skipped because it was already there', () => {
+    // What Claude Code sent: the `o` of `oat01` was on screen from an earlier
+    // frame, so the redraw jumped over it with ESC[9G.
+    const sent = `Welcomeo\r\x1B[1Gsk-ant-\x1B[9Gat01-${TOKEN.slice(13)}\r\n`
+    expect(renderScreen(sent).split('\n')[0]).toBe(TOKEN)
+  })
+
+  it('applies erases and moves the way a terminal does', () => {
+    expect(renderScreen('abc\x1B[2K\rxy')).toBe('xy')
+    expect(renderScreen('one\r\ntwo\x1B[1A\x1B[1GONE')).toBe('ONE\ntwo')
+    expect(renderScreen('\x1B[?25l\x1B[>4m\x1B[<u\x1B(Bplain\x1B[0m')).toBe('plain')
+  })
+})
+
 describe('tokenFromOutput', () => {
   it('reads the token through the colour codes a terminal UI draws', () => {
     const drawn = `\x1B[2K\x1B[1GYour OAuth token (valid for 1 year):\r\n\r\n\x1B[1m${TOKEN}\x1B[22m\r\n\r\nUse this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>`
     expect(tokenFromOutput(drawn)).toBe(TOKEN)
   })
 
-  it('prefers the whole token over a redraw caught halfway', () => {
-    expect(tokenFromOutput(`${TOKEN.slice(0, 60)}\x1B[2K${TOKEN}\n`)).toBe(TOKEN)
-  })
-
   it('finds nothing before the token is printed', () => {
-    expect(tokenFromOutput('Opening browser to sign in...\nPaste code here if prompted > ')).toBeNull()
+    expect(tokenFromOutput('Opening browser to sign in...\r\nPaste code here if prompted > ')).toBeNull()
+  })
+})
+
+describe('lastWords', () => {
+  it('is words, never the control codes a closing interface sends', () => {
+    expect(lastWords('OAuth error: access denied\r\n\x1B(B\x1B[>4m\x1B[<u 7 8 \x1B[>4m\x1B[<u')).toBe('OAuth error: access denied')
   })
 })
 
 describe('SignIn', () => {
   it('captures the token a CLI prints, on a terminal wide enough for it', async () => {
     // Prints the width it was given, so a wrap would show.
-    const cli = stub('claude', `echo "cols $(tput cols)"; sleep 0.2; printf 'Your OAuth token (valid for 1 year):\\n\\n${TOKEN}\\n\\n'; sleep 30`)
+    const cli = stub('claude', `echo "cols $(tput cols)"; sleep 0.2; printf 'Your OAuth token (valid for 1 year):\\n\\n${TOKEN}\\n\\nStore this token securely.\\n'; sleep 30`)
     const tokens: string[] = []
     const signIn = new SignIn()
     signIn.start({ command: [cli, 'setup-token'], onToken: token => void tokens.push(token) })

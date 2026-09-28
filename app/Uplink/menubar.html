@@ -524,7 +524,7 @@
         lastTooltip = tooltip
       }
       // A left click opens the popover natively (--tray-popover); this menu is
-      // the right click. `quit` is handled natively.
+      // the right click.
       const menu = [
         { label: `Uplink ${status.version}: ${HEADLINES[status.state] || status.state}`, action: 'noop', enabled: false },
         { type: 'separator' },
@@ -533,7 +533,9 @@
         { label: status.settings.paused ? 'Resume' : 'Pause', action: 'toggle-pause', enabled: status.state !== 'setup' },
         { label: `Check ${status.settings.engine === 'codex' ? 'Codex' : 'Claude'} Sign-in`, action: 'test-engine' },
         { type: 'separator' },
-        { label: 'Quit Uplink', action: 'quit', shortcut: 'q' },
+        // Not Craft's built-in `quit`: through the agent, so a quit the person
+        // chose is told apart from one macOS forced, which reopens.
+        { label: 'Quit Uplink', action: 'quit-uplink', shortcut: 'q' },
       ]
       const serialized = JSON.stringify(menu)
       if (serialized !== lastMenu) {
@@ -645,6 +647,7 @@
       'stop': async () => render(await api('/api/stop', {})),
       'toggle-pause': async () => render(await api('/api/settings', { paused: !current?.settings.paused })),
       'quit': quit,
+      'quit-uplink': quit,
     }
 
     document.addEventListener('click', (event) => {

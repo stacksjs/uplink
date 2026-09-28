@@ -92,7 +92,24 @@ async function shutdown(code: number): Promise<never> {
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const)
   process.on(signal, () => void shutdown(0))
 
-// Quitting from the menu ends the Craft runtime; the app ends with it.
+const menubarStartedAt = Date.now()
 const exitCode = await craft.exited
 console.log(`[uplink] menubar exited (${exitCode})`)
+
+// Quit from the popover or the menu goes through the agent, so it is known to
+// be the person's. Anything else that ends the menubar cleanly is macOS: the
+// "Quit & Reopen" System Settings offers after Full Disk Access is switched on
+// quits the menubar and then reopens nothing, which left Uplink closed at the
+// one moment setup needed it running. So open it again. Not after a crash, and
+// not for a menubar that died at once, which would only loop.
+const bundle = process.execPath.match(/^(.*?\.app)\/Contents\/MacOS\//)?.[1]
+if (!stopping && !agent.quitRequested && exitCode === 0 && bundle && Date.now() - menubarStartedAt > 10_000) {
+  console.log('[uplink] macOS quit the menubar; opening Uplink again')
+  stopping = true
+  keepAwake.kill()
+  // Stopped first, so the new copy finds the single-instance lock free.
+  await agent.stop()
+  Bun.spawn(['/usr/bin/open', '-n', bundle], { stdio: ['ignore', 'ignore', 'ignore'] }).unref()
+  process.exit(0)
+}
 await shutdown(0)

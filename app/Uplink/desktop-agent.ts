@@ -67,6 +67,8 @@ interface PopoverCheck {
 export interface DesktopAgent {
   port: number
   server: Server<undefined>
+  /** The person asked to quit, from the popover or the menu. */
+  readonly quitRequested: boolean
   stop: () => Promise<void>
 }
 
@@ -174,6 +176,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   let checkingEngines = false
   let automation: AutomationState | null = null
   let checkingAutomation = false
+  let quitRequested = false
   const signIn = new SignIn()
   // What setup has already done for the person this launch, so it happens
   // once rather than every few seconds.
@@ -515,6 +518,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           return json({ stopped: await uplink?.stopAll() ?? 0, ...status() })
 
         case '/api/quit':
+          quitRequested = true
           setTimeout(() => process.kill(process.pid, 'SIGTERM'), 50)
           return json({ ok: true })
       }
@@ -526,6 +530,9 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   return {
     port: server.port ?? 0,
     server,
+    get quitRequested() {
+      return quitRequested
+    },
     stop: async () => {
       clearInterval(retry)
       signIn.cancel()
