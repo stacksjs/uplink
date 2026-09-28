@@ -13,6 +13,9 @@ function fakeStripe(overrides: Partial<CheckoutDeps> = {}): CheckoutDeps & { ses
       sessions.push(params)
       return { url: 'https://checkout.stripe.com/c/pay/cs_test_x' }
     },
+    promotionFor: async code => code === 'SIXMONTHS'
+      ? { id: 'promo_six', couponId: 'uplink_six_months_free' }
+      : code === 'OTHERAPP' ? { id: 'promo_other', couponId: 'another_apps_coupon' } : undefined,
     ...overrides,
   }
 }
@@ -64,6 +67,35 @@ describe('startCheckout', () => {
     expect(await startCheckout('yearly', 'https://x', fakeStripe({ configured: () => false }))).toMatchObject({ kind: 'unavailable' })
     expect(await startCheckout('yearly', 'https://x', fakeStripe({ priceFor: async () => undefined }))).toMatchObject({ kind: 'unavailable', reason: expect.stringContaining('uplink_yearly') })
     expect(await startCheckout('yearly', 'https://x', fakeStripe({ createSession: async () => { throw new Error('card network down') } }))).toEqual({ kind: 'unavailable', reason: 'card network down' })
+  })
+})
+
+describe('codes', () => {
+  it('give Monthly six free months with no card', async () => {
+    const stripe = fakeStripe()
+    expect(await startCheckout('monthly', 'https://x', stripe, ' sixmonths ')).toMatchObject({ kind: 'redirect' })
+    expect(stripe.sessions[0]).toMatchObject({ discounts: [{ promotion_code: 'promo_six' }], payment_method_collection: 'if_required' })
+  })
+
+  it('are refused on Yearly and Lifetime, where six free months would be a free year or everything', async () => {
+    const stripe = fakeStripe()
+    expect(await startCheckout('yearly', 'https://x', stripe, 'SIXMONTHS')).toMatchObject({ kind: 'bad-code' })
+    expect(await startCheckout('lifetime', 'https://x', stripe, 'SIXMONTHS')).toMatchObject({ kind: 'bad-code' })
+    expect(stripe.sessions).toHaveLength(0)
+  })
+
+  it('must be Uplink\'s own, not another app\'s in the shared Stripe account', async () => {
+    const stripe = fakeStripe()
+    expect(await startCheckout('monthly', 'https://x', stripe, 'OTHERAPP')).toMatchObject({ kind: 'bad-code' })
+    expect(await startCheckout('monthly', 'https://x', stripe, 'NOPE')).toMatchObject({ kind: 'bad-code' })
+    expect(stripe.sessions).toHaveLength(0)
+  })
+
+  it('cannot be typed into Stripe\'s page, where every plan would take it', async () => {
+    const stripe = fakeStripe()
+    await startCheckout('lifetime', 'https://x', stripe)
+    expect(stripe.sessions[0].allow_promotion_codes).toBeUndefined()
+    expect(stripe.sessions[0].discounts).toBeUndefined()
   })
 })
 

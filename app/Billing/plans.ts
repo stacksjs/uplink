@@ -52,6 +52,18 @@ export const PLANS: Plan[] = [
   },
 ]
 
+/**
+ * The code for six free months of Monthly. Stripe knows it as a promotion code
+ * on this coupon (`buddy stripe:setup` creates both from config/saas.ts).
+ */
+export const SIX_MONTHS_FREE = {
+  couponId: 'uplink_six_months_free',
+  code: 'SIXMONTHS',
+  months: 6,
+  /** Only this plan takes it. */
+  plan: 'monthly' as PlanId,
+}
+
 export function planById(id: unknown): Plan | undefined {
   return PLANS.find(plan => plan.id === id)
 }

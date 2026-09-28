@@ -1,5 +1,5 @@
 import type { SaasConfig } from '@stacksjs/types'
-import { PLANS, PRODUCT_NAME } from '../app/Billing/plans'
+import { PLANS, PRODUCT_NAME, SIX_MONTHS_FREE } from '../app/Billing/plans'
 
 /**
  * **Payment Configuration**
@@ -32,7 +32,28 @@ export default {
     secret: 'your-webhook-secret',
   },
   currencies: ['usd'],
-  coupons: [],
+  // Six months of Monthly, free: 100% off six monthly invoices. The code is
+  // only honoured on Monthly - checkout applies it itself, because Stripe
+  // restricts coupons by product and all three plans share one (a "repeating"
+  // coupon on Yearly would make the whole first year free, and on Lifetime,
+  // everything). See app/Billing/checkout.ts.
+  coupons: [
+    {
+      id: SIX_MONTHS_FREE.couponId,
+      name: '6 months free',
+      percentOff: 100,
+      duration: 'repeating',
+      durationInMonths: 6,
+      codes: [SIX_MONTHS_FREE.code],
+    },
+  ],
+  // Where a subscriber cancels, changes card and gets invoices. Cancelling
+  // keeps what they paid for until the period ends.
+  portal: {
+    headline: 'Manage your Uplink plan',
+    returnUrl: 'https://uplink.stacksjs.com/',
+    cancel: 'at_period_end',
+  },
   products: [
     {
       name: PRODUCT_NAME,

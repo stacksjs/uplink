@@ -7,13 +7,14 @@
  * tech. The plan most people want long-term is lifted, not shouted.
  */
 import { services } from '@stacksjs/config'
-import { formatCents, PLANS, yearlySavingPercent } from '../../app/Billing/plans'
+import { formatCents, PLANS, SIX_MONTHS_FREE, yearlySavingPercent } from '../../app/Billing/plans'
 
 const path = '/pricing'
 const title = 'Pricing - Uplink'
 const description = 'Uplink is $1.99 a month, $19.99 a year, or $29.99 once. Every plan is the whole app, running on your own Claude or ChatGPT plan.'
 
 const yearlySaving = yearlySavingPercent()
+const freeMonths = SIX_MONTHS_FREE.months
 const badges = { monthly: '', yearly: `Save ${yearlySaving}%`, lifetime: 'Pay once' }
 const terms = {
   monthly: 'Renews every month until cancelled.',
@@ -42,6 +43,7 @@ const included = [
 const faqs = [
   { q: 'Is anything charged per text?', a: 'No. Uplink costs the price above. The answers run on your own Claude or ChatGPT plan.' },
   { q: 'Who handles the payment?', a: 'Stripe. You pay on Stripe\'s own checkout page, so your card never reaches Uplink or this site.' },
+  { q: 'Can I cancel?', a: 'Yes. Uplink\'s menubar has Manage Subscription, which opens Stripe\'s billing page: cancel there and you keep what you paid for until the period ends.' },
   { q: 'Which one should I pick?', a: 'Monthly to try it on one trip. Yearly if you text your Mac through the year. Lifetime if you would rather pay once and be done.' },
   { q: 'What else do I need?', a: 'A Mac on macOS 13 or later, an iPhone with iMessage, and Claude Code or Codex signed in on the Mac. Uplink walks you through the rest.' },
 ]
@@ -92,6 +94,19 @@ const faqs = [
             </article>
           @endforeach
         </div>
+
+        <form action="/checkout/monthly" method="get" class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mt-6 px-7 py-5 rounded-2xl u-wash u-reveal">
+          <div>
+            <h2 class="font-semibold">Have a code?</h2>
+            <p class="mt-1 text-sm u-muted">A code gets you {{ freeMonths }} months of Monthly free, with no card until they end.</p>
+          </div>
+          <div class="flex gap-2">
+            <label for="code" class="sr-only">Code</label>
+            <input id="code" name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Code"
+              class="px-4 py-2.5 w-40 border rounded-full uppercase u-line u-raised u-mono" style="color: var(--ink)">
+            <button type="submit" class="u-btn u-btn-primary" style="padding: .625rem 1.1rem">Redeem</button>
+          </div>
+        </form>
 
         <div class="grid gap-8 lg:gap-12 lg:grid-cols-[0.8fr_1.2fr] mt-16 p-7 sm:p-10 border rounded-2xl u-line u-reveal">
           <div>

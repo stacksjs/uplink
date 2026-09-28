@@ -1,10 +1,11 @@
 <script server>
 /**
- * /thanks - where Stripe Checkout returns after a purchase. It reads the
- * session back from Stripe, so it only says "paid" when Stripe says so; an
- * unknown or missing session gets a plain thank-you with no claims.
+ * /thanks - where Stripe Checkout returns after a purchase. It issues the
+ * license for that checkout (the same one on every reload) only once Stripe
+ * says it is paid; an unknown or missing session gets a plain thank-you with
+ * no claims and no key.
  */
-import { readReceipt } from '../../app/Billing/checkout'
+import { thanksFor } from '../../app/Billing/license-store'
 import release from '../data/release.json'
 
 const path = '/thanks'
@@ -13,11 +14,14 @@ const description = 'Thanks for buying Uplink.'
 const noindex = true
 
 setResponseHeader('Cache-Control', 'no-store')
-const receipt = await readReceipt(query?.session_id)
+const thanks = await thanksFor(query?.session_id)
 
-const planName = receipt?.plan?.name ?? ''
-const email = receipt?.email ?? ''
-const paid = receipt?.paid === true
+const planName = thanks?.plan?.name ?? ''
+const email = thanks?.email ?? ''
+const licenseKey = thanks?.licenseKey ?? ''
+const paid = Boolean(licenseKey)
+// Opens Uplink straight onto its activation, with the key filled in.
+const activateUrl = licenseKey ? `uplink://activate?key=${encodeURIComponent(licenseKey)}` : ''
 const downloadUrl = release.url
 </script>
 
@@ -38,6 +42,20 @@ const downloadUrl = release.url
         @if(email)
           <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Stripe is sending the receipt to {{ email }}.</p>
         @endif
+
+        <section class="mt-10 p-6 border rounded-2xl u-line u-raised u-rise" style="--i: 3" aria-labelledby="license-title">
+          <h2 id="license-title" class="text-sm font-medium u-muted">Your license key</h2>
+          <p class="mt-2 font-medium text-2xl tracking-wide select-all u-mono">{{ licenseKey }}</p>
+          <p class="mt-2 text-sm u-muted">Keep it: it is how Uplink knows this Mac is paid for. Bookmark this page to find it again.</p>
+          <div class="flex flex-wrap gap-3 mt-5">
+            <a href="{{ activateUrl }}" class="u-btn u-btn-primary">Activate Uplink</a>
+            <a href="{{ downloadUrl }}" class="u-btn u-btn-ghost">
+              <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
+              Download for Mac
+            </a>
+          </div>
+          <p class="mt-3 text-xs u-muted">Activate opens Uplink with the key filled in. Or paste the key into Uplink's first setup step.</p>
+        </section>
       @else
         <h1 class="mt-6 font-semibold text-4xl tracking-tight u-rise" style="--i: 1">Thanks for choosing Uplink.</h1>
         <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Your receipt comes from Stripe by email once the payment clears.</p>
@@ -45,8 +63,8 @@ const downloadUrl = release.url
 
       <ol class="grid gap-6 mt-12 u-rise" style="--i: 3">
         <li>
-          <h2 class="font-semibold text-lg">Download it</h2>
-          <p class="mt-1 u-muted">Drag Uplink to Applications and open it.</p>
+          <h2 class="font-semibold text-lg">Download it and activate</h2>
+          <p class="mt-1 u-muted">Drag Uplink to Applications, open it, then activate with your key.</p>
         </li>
         <li>
           <h2 class="font-semibold text-lg">Say yes three times</h2>
@@ -58,13 +76,15 @@ const downloadUrl = release.url
         </li>
       </ol>
 
-      <div class="flex flex-wrap gap-3 mt-12">
-        <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
-          <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
-          Download for Mac
-        </a>
-        <a href="/" class="u-btn u-btn-ghost">Back to the home page</a>
-      </div>
+      @if(!paid)
+        <div class="flex flex-wrap gap-3 mt-12">
+          <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
+            <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
+            Download for Mac
+          </a>
+          <a href="/" class="u-btn u-btn-ghost">Back to the home page</a>
+        </div>
+      @endif
     </main>
     @include('site-footer')
   </body>

@@ -1,5 +1,13 @@
 {
   "LSUIElement": true,
   "LSMinimumSystemVersion": "13.0",
-  "NSAppleEventsUsageDescription": "Uplink sends your replies to your texts through Messages."
+  "NSAppleEventsUsageDescription": "Uplink sends your replies to your texts through Messages.",
+  "CFBundleURLTypes": [
+    {
+      "CFBundleURLName": "com.stacksjs.uplink",
+      "CFBundleURLSchemes": [
+        "uplink"
+      ]
+    }
+  ]
 }

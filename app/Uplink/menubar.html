@@ -182,6 +182,24 @@
 
     <section id="setup" hidden>
       <ol class="steps">
+        <li class="step" id="step-license">
+          <span class="mark" data-mark>1</span>
+          <div>
+            <div class="step-title">Activate Uplink</div>
+            <div class="step-detail" data-detail></div>
+          </div>
+          <div class="step-body" data-body>
+            <p>Paste the key from your thank-you page, or choose a plan. A code gets you six months of Monthly free.</p>
+            <input id="license-key" type="text" placeholder="UPLK-XXXX-XXXX-XXXX-XXXX" spellcheck="false" autocomplete="off" aria-label="License key"
+              style="display: block; width: 100%; margin-top: 6px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; -webkit-user-select: text; user-select: text">
+            <p class="error" id="license-error" hidden></p>
+            <div class="buttons">
+              <button data-action="open-pricing">Choose a Plan</button>
+              <span class="grow"></span>
+              <button class="default" data-action="activate">Activate</button>
+            </div>
+          </div>
+        </li>
         <li class="step" id="step-fda">
           <span class="mark" data-mark>1</span>
           <div>
@@ -298,6 +316,11 @@
         <button class="link" data-action="edit-allowed" id="edit-allowed">Change</button>
       </div>
       <div id="allowed-settings-home"></div>
+      <div class="row">
+        <span>Plan</span>
+        <span class="grow secondary" id="plan-summary"></span>
+        <button class="link" data-action="manage-subscription" id="manage-subscription" hidden>Manage</button>
+      </div>
       <div class="row"><label class="check"><input type="checkbox" id="login"> Open at login</label></div>
     </section>
 
@@ -351,7 +374,7 @@
     }
 
     function renderSteps(status, byId) {
-      const steps = [['#step-fda', byId.fda], ['#step-engine', byId.engine], ['#step-handles', byId.handles], ['#step-automation', byId.automation]]
+      const steps = [['#step-license', byId.license], ['#step-fda', byId.fda], ['#step-engine', byId.engine], ['#step-handles', byId.handles], ['#step-automation', byId.automation]]
       const firstTodo = steps.findIndex(([, check]) => !check.ok)
       steps.forEach(([id, check], index) => {
         const el = $(id)
@@ -502,6 +525,8 @@
         }))
       }
 
+      $('#plan-summary').textContent = status.license?.summary ?? ''
+      $('#manage-subscription').hidden = !status.license?.manageable
       $('#login').checked = status.settings.openAtLogin
       $('#pause').textContent = status.settings.paused ? 'Resume Uplink' : 'Pause Uplink'
       $('#pause').disabled = setup
@@ -532,6 +557,7 @@
         ...(status.active.length > 0 ? [{ label: 'Stop Current Task', action: 'stop' }] : []),
         { label: status.settings.paused ? 'Resume' : 'Pause', action: 'toggle-pause', enabled: status.state !== 'setup' },
         { label: `Check ${status.settings.engine === 'codex' ? 'Codex' : 'Claude'} Sign-in`, action: 'test-engine' },
+        ...(status.license?.manageable ? [{ label: 'Manage Subscription', action: 'manage-subscription' }] : []),
         { type: 'separator' },
         // Not Craft's built-in `quit`: through the agent, so a quit the person
         // chose is told apart from one macOS forced, which reopens.
@@ -607,6 +633,9 @@
         await refresh()
       },
       'open-automation': () => api('/api/open/automation', {}),
+      'activate': () => activateKey($('#license-key').value),
+      'open-pricing': () => api('/api/open/pricing', {}),
+      'manage-subscription': () => api('/api/license/portal', {}),
       'sign-in': async () => render(await api('/api/engine/sign-in', {})),
       'cancel-sign-in': async () => render(await api('/api/engine/sign-in/cancel', {})),
       'toggle-paste': () => {
@@ -658,10 +687,52 @@
       Promise.resolve(actions[button.dataset.action]?.()).finally(() => { button.disabled = false })
     })
     $('#allowed').addEventListener('input', () => { allowedDirty = true })
+    $('#license-key').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        void activateKey($('#license-key').value)
+      }
+    })
     // Switching engines restarts the watcher and re-probes; the answer comes
     // back in the same response.
     $('#engine').addEventListener('change', async event => render(await api('/api/settings', { engine: event.target.value })))
     $('#login').addEventListener('change', async event => render(await api('/api/settings', { openAtLogin: event.target.checked })))
+
+    /** Activate a key, from the field or an uplink://activate link, and say how it went. */
+    async function activateKey(key) {
+      const error = $('#license-error')
+      error.hidden = true
+      const result = await api('/api/license/activate', { key })
+      if (!result.ok) {
+        error.textContent = result.error || 'That key did not work.'
+        error.hidden = false
+      }
+      else {
+        $('#license-key').value = ''
+      }
+      render(result)
+    }
+
+    // "Activate Uplink" on the thank-you page opens uplink://activate?key=...
+    // Open the popover with the key in, and activate it.
+    function activateFromLink(link) {
+      let key = null
+      try {
+        const url = new URL(link)
+        if (url.protocol === 'uplink:')
+          key = url.searchParams.get('key')
+      }
+      catch {}
+      if (!key)
+        return
+      $('#license-key').value = key
+      open()
+      void activateKey(key)
+    }
+    craft?.deepLink?.onUrl?.(detail => activateFromLink(typeof detail === 'string' ? detail : detail?.url))
+    const initialLink = craft?.deepLink?.getInitialUrl?.()
+    if (initialLink)
+      activateFromLink(initialLink)
 
     // The keys a popover answers to.
     document.addEventListener('keydown', (event) => {

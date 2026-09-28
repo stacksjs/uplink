@@ -21,6 +21,13 @@ import { response, route } from '@stacksjs/router'
 // Your custom routes go here. This one answers `GET /api/hello`:
 route.get('/hello', () => response.text('hello world'))
 
+// The Mac app's license check and its way into the Stripe customer portal.
+// Both take the license key, which is the only credential the app holds. No
+// cookie is involved - the caller is a native app, not a browser session - so
+// there is nothing for a CSRF token to protect, and the app has none to send.
+route.post('/license/check', 'Actions/License/CheckLicenseAction').skipCsrf()
+route.post('/billing/portal', 'Actions/Billing/OpenPortalAction').skipCsrf()
+
 // `/coming-soon` is served as an STX view from
 // `storage/framework/defaults/resources/views/coming-soon.stx`. The
 // view auto-resolves through stx-serve, so no route registration is

@@ -233,4 +233,12 @@ jobs:
             "303 https://checkout.stripe.com/"*) ;;
             *) echo "::error::/checkout/monthly answered '${to%% *}', not a 303 to Stripe Checkout."; exit 1 ;;
           esac
-          echo "Home page, pricing, checkout, 404s and assets check out."
+          # The license API answers through the main site's /api proxy: a key it
+          # never issued gets its own 404, which proves the API process is up,
+          # routed, and reading the license table.
+          said=$(curl -s --max-time 30 -X POST -H 'content-type: application/json' -d '{"key":"UPLK-AAAA-AAAA-AAAA-AAAA"}' "${url}api/license/check")
+          case "$said" in
+            *"not one Uplink issued"*) ;;
+            *) echo "::error::/api/license/check did not answer as the license API: ${said:0:200}"; exit 1 ;;
+          esac
+          echo "Home page, pricing, checkout, license API, 404s and assets check out."

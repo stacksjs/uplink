@@ -45,6 +45,21 @@ Keychain), and who may text it. Then text yourself `ping`.
 
 You need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) and a Claude plan.
 
+Uplink answers texts once it is activated: [$1.99 a month, $19.99 a year, or $29.99
+once](https://uplink.stacksjs.com/pricing), and a code gets six months of Monthly free. The
+thank-you page has an **Activate Uplink** button that opens the app with the key filled in.
+Subscriptions are managed in Stripe's customer portal, from **Manage** in the menubar. A licensed
+Mac keeps answering for two weeks without reaching the license server, so it works off-grid.
+
+### Licensing, for maintainers
+
+- Plans, the six-months-free coupon (`SIXMONTHS`) and the customer portal are declared in
+  `config/saas.ts` from `app/Billing/plans.ts`; `./buddy stripe:setup` makes Stripe match.
+- `/checkout/<plan>` starts Stripe Checkout (`app/Billing/checkout.ts`); a code is honoured on
+  Monthly only. `/thanks` issues the license (`app/Billing/licenses.ts`, the `License` model).
+- The app calls `POST /api/license/check` and `POST /api/billing/portal` (`routes/api.ts`),
+  served by the `api` site in `config/cloud.ts`.
+
 ## Build from source
 
 The same app, run from this repository as a launchd service (bundle id `com.stacksjs.uplink.source`, so
