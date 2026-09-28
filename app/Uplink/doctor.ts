@@ -1,7 +1,9 @@
 import type { UplinkConfig } from './config'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import process from 'node:process'
+import { formatDuration, truncate } from './format'
 import { MessagesDb } from './messages-db'
 import { servicePaths, serviceState } from './service'
 
@@ -48,17 +50,31 @@ export async function readHeartbeat(appDir: string): Promise<Heartbeat | null> {
 /** A heartbeat older than this means the watcher is not really running. */
 const HEARTBEAT_STALE_MS = 2 * 60_000
 
+/**
+ * Whether the claude CLI can actually answer, checked with one real turn.
+ *
+ * Only asking "is a token set" passed a token truncated at the terminal's
+ * 80-column wrap: set, well-formed, and rejected with a 401 on first use.
+ */
 async function claudeAuth(bin: string): Promise<{ ok: boolean, detail: string }> {
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN)
-    return { ok: true, detail: 'CLAUDE_CODE_OAUTH_TOKEN is set (from claude setup-token)' }
   try {
-    const proc = Bun.spawn([bin, 'auth', 'status'], { stdout: 'pipe', stderr: 'pipe' })
+    const proc = Bun.spawn([bin, '-p', 'Reply with exactly: ok', '--model', 'haiku', '--output-format', 'json'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      cwd: tmpdir(),
+    })
+    const timer = setTimeout(() => proc.kill(), 60_000)
     const text = await new Response(proc.stdout).text()
+    clearTimeout(timer)
     await proc.exited
-    const status = JSON.parse(text) as { loggedIn?: boolean, authMethod?: string }
-    return status.loggedIn
-      ? { ok: true, detail: `logged in (${status.authMethod})` }
-      : { ok: false, detail: 'the claude CLI is not logged in' }
+    const result = JSON.parse(text) as { is_error?: boolean, result?: string }
+    const via = process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'the CLI login'
+    if (!result.is_error)
+      return { ok: true, detail: `answers (via ${via})` }
+    const hint = process.env.CLAUDE_CODE_OAUTH_TOKEN
+      ? ` - the token is ${process.env.CLAUDE_CODE_OAUTH_TOKEN.length} characters; a paste cut at a line wrap is the usual cause`
+      : ''
+    return { ok: false, detail: `${truncate(result.result ?? 'no answer', 120)}${hint}` }
   }
   catch (error) {
     return { ok: false, detail: `could not run ${bin}: ${error instanceof Error ? error.message : String(error)}` }
@@ -82,7 +98,7 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
   if (fresh) {
     checks.push(heartbeat.lastError
       ? { name: 'Reading Messages', ok: false, detail: heartbeat.lastError, fix: `Grant Full Disk Access to ${paths.bundle} in System Settings > Privacy & Security > Full Disk Access, then ./buddy uplink:restart` }
-      : { name: 'Reading Messages', ok: true, detail: `last poll ${Math.round((Date.now() - (heartbeat.lastPollAt ?? 0)) / 1000)}s ago` })
+      : { name: 'Reading Messages', ok: true, detail: heartbeat.lastPollAt ? `last poll ${formatDuration(Date.now() - heartbeat.lastPollAt)} ago` : 'starting up' })
   }
   else {
     // No live watcher to ask, so check from this process instead.
@@ -110,7 +126,7 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
   const auth = await claudeAuth(config.claudeBin)
   checks.push(auth.ok
     ? { name: 'Claude account', ok: true, detail: auth.detail }
-    : { name: 'Claude account', ok: false, detail: auth.detail, fix: 'Run claude setup-token, then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token>' })
+    : { name: 'Claude account', ok: false, detail: auth.detail, fix: 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart' })
 
   const messages = Bun.spawnSync(['pgrep', '-x', 'Messages'])
   checks.push(messages.exitCode === 0

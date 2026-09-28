@@ -51,8 +51,15 @@ export default defineCommand((cli) => {
       const appDir = process.cwd()
       const startedAt = Date.now()
 
-      // Receiving works without the app open, but replies go through it.
-      Bun.spawnSync(['open', '-g', '-a', 'Messages'])
+      // Replies go through Messages, and a quit Messages is easy to miss from
+      // a phone - so keep it running (in the background) for as long as we are.
+      const keepMessagesOpen = (): void => {
+        if (Bun.spawnSync(['pgrep', '-x', 'Messages']).exitCode !== 0) {
+          console.log('[uplink] Messages was not running; reopening it in the background')
+          Bun.spawnSync(['open', '-g', '-a', 'Messages'])
+        }
+      }
+      keepMessagesOpen()
 
       const messages = await openMessages(config, appDir, startedAt)
       const uplink = new Uplink({
@@ -74,7 +81,10 @@ export default defineCommand((cli) => {
         active: uplink.activeRuns,
       })
       await beat()
-      setInterval(beat, HEARTBEAT_MS)
+      setInterval(() => {
+        keepMessagesOpen()
+        void beat()
+      }, HEARTBEAT_MS)
 
       const shutdown = async (): Promise<void> => {
         await uplink.stop()
