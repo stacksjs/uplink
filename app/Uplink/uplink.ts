@@ -155,6 +155,41 @@ export class Uplink {
     }
   }
 
+  /**
+   * Stop every thread's task from the Mac: the menubar's Stop button. Each
+   * thread that had one is told, because whoever texted is waiting for an
+   * answer that is now not coming. Returns how many threads were stopped.
+   */
+  async stopAll(): Promise<number> {
+    let stopped = 0
+    for (const state of this.chats.values()) {
+      const target = state.active?.target ?? state.queue[0]?.target
+      const said = await this.stopThread(state, 'Stopped on the Mac')
+      if (!said || !target)
+        continue
+      stopped++
+      await this.reply(target, said)
+    }
+    return stopped
+  }
+
+  /**
+   * Cancel a thread's current task and clear what is queued behind it. Returns
+   * what to tell the thread, or null when there was nothing to stop.
+   */
+  private async stopThread(state: ChatState, verb: string): Promise<string | null> {
+    const queued = state.queue.splice(0)
+    for (const job of queued)
+      await this.deps.store.updateRun(job.runId, { status: 'stopped', finishedAt: this.now() })
+    if (!state.active)
+      return queued.length > 0 ? `Cleared ${queued.length} queued.` : null
+    state.active.stoppedByUser = true
+    state.active.run.cancel()
+    const said = `${verb}: ${truncate(state.active.prompt, 60)}${queued.length > 0 ? ` and cleared ${queued.length} queued` : ''}`
+    // "Stopped: Whats the NFL score rn?" rather than "rn?."
+    return /[.?!…]$/.test(said) ? said : `${said}.`
+  }
+
   private schedule(): void {
     if (this.stopped)
       return
@@ -425,20 +460,9 @@ export class Uplink {
         return
       }
 
-      case 'stop': {
-        const queued = state.queue.splice(0)
-        for (const job of queued)
-          await this.deps.store.updateRun(job.runId, { status: 'stopped', finishedAt: this.now() })
-        if (!state.active) {
-          await this.reply(target, queued.length > 0 ? `Cleared ${queued.length} queued.` : 'Nothing running.')
-          return
-        }
-        state.active.stoppedByUser = true
-        state.active.run.cancel()
-        const extra = queued.length > 0 ? ` and cleared ${queued.length} queued` : ''
-        await this.reply(target, `Stopped: ${truncate(state.active.prompt, 60)}${extra}.`)
+      case 'stop':
+        await this.reply(target, await this.stopThread(state, 'Stopped') ?? 'Nothing running.')
         return
-      }
 
       case 'new': {
         const conversation = await this.conversation(target)

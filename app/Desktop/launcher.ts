@@ -54,22 +54,20 @@ function craftRuntime(): string {
 const agent = await startDesktopAgent({ version: pkg.version })
 console.log(`[uplink] ${pkg.version} serving the menubar on 127.0.0.1:${agent.port}`)
 
-// Headless: the status item appears and the popover stays hidden until it is
-// clicked, or until the page opens it because setup is unfinished.
+// --tray-popover: Craft hangs the page under the status item on the popover
+// material, opens and closes it on the item's click, and closes it on a click
+// anywhere else. It stays hidden until then, or until the page opens it itself
+// because setup is unfinished. The page sizes it to its content.
 const craft = Bun.spawn([
   craftRuntime(),
   `http://127.0.0.1:${agent.port}/`,
   '--title',
   'Uplink',
-  '--system-tray',
-  '--headless',
-  '--frameless',
-  '--always-on-top',
-  '--no-resize',
+  '--tray-popover',
   '--width',
-  '380',
+  '340',
   '--height',
-  '600',
+  '420',
 ], { stdio: ['ignore', 'ignore', 'pipe'] })
 
 void new Response(craft.stderr).text().then((stderr) => {

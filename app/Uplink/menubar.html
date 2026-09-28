@@ -7,178 +7,319 @@
   <title>Uplink</title>
   <!--
     The menubar popover. Served by the Uplink agent on 127.0.0.1 and hosted by
-    the Craft runtime; it drives the status item through window.craft.tray and
-    the popover through window.craft.window. Not an stx template: it runs in
-    the native webview inside Uplink.app, with no Stacks server behind it.
+    the Craft runtime with --tray-popover, which draws the popover material
+    behind this page, rounds it, hangs it under the status item and closes it
+    on a click elsewhere. Not an stx template: it runs in the native webview
+    inside Uplink.app, with no Stacks server behind it.
+
+    It is meant to read as part of macOS: the system's own label, separator and
+    accent colours (so it follows light, dark and the accent setting), WebKit's
+    native buttons, checkboxes and pop-up menus, and the page's background left
+    clear so the material shows through.
   -->
   <style>
     :root {
-      --paper: #fafaf9; --raised: #ffffff; --ink: #18181b; --muted: #52525b; --line: #e4e4e7;
-      --accent: #f59e0b; --accent-ink: #b45309; --accent-wash: #fffbeb; --ok: #15803d; --warn: #b45309;
+      --label: rgba(0, 0, 0, .85);
+      --secondary: rgba(0, 0, 0, .5);
+      --tertiary: rgba(0, 0, 0, .26);
+      --separator: rgba(0, 0, 0, .1);
+      --accent: #007aff;
+      --link: #0068da;
+      --green: #28cd41;
+      --orange: #ff9500;
+      --red: #ff3b30;
+      --gray: #8e8e93;
+      --fill: rgba(0, 0, 0, .05);
+      --hover: rgba(0, 0, 0, .07);
     }
     @media (prefers-color-scheme: dark) {
-      :root { --paper: #111113; --raised: #18181b; --ink: #f4f4f5; --muted: #a1a1aa; --line: #27272a; --accent-ink: #fbbf24; --accent-wash: #1c1508; --ok: #4ade80; --warn: #fbbf24; }
+      :root {
+        --label: rgba(255, 255, 255, .85);
+        --secondary: rgba(255, 255, 255, .55);
+        --tertiary: rgba(255, 255, 255, .25);
+        --separator: rgba(255, 255, 255, .1);
+        --accent: #0a84ff;
+        --link: #419cff;
+        --green: #32d74b;
+        --orange: #ff9f0a;
+        --red: #ff453a;
+        --fill: rgba(255, 255, 255, .06);
+        --hover: rgba(255, 255, 255, .1);
+      }
     }
+    /* The system's own colours where WebKit has them: they follow the accent
+       colour the person chose, and increased contrast. */
+    @supports (color: -apple-system-label) {
+      :root {
+        --label: -apple-system-label;
+        --secondary: -apple-system-secondary-label;
+        --tertiary: -apple-system-tertiary-label;
+        --separator: -apple-system-separator;
+        --accent: -apple-system-control-accent;
+        --link: -apple-system-blue;
+        --green: -apple-system-green;
+        --orange: -apple-system-orange;
+        --red: -apple-system-red;
+        --gray: -apple-system-gray;
+      }
+    }
+
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
-    body { display: flex; flex-direction: column; }
-    header { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid var(--line); }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
-    .dot.listening { background: var(--ok); }
-    .dot.working { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
-    .dot.setup { background: var(--warn); }
-    @keyframes pulse { 50% { opacity: .35; } }
-    @media (prefers-reduced-motion: reduce) { .dot.working { animation: none; } }
-    h1 { margin: 0; font-size: 15px; font-weight: 600; }
-    .sub { color: var(--muted); font-size: 12px; }
-    main { flex: 1; overflow-y: auto; padding: 12px 16px 16px; }
-    section + section { margin-top: 18px; }
-    h2 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-    .card { background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
-    .card + .card { margin-top: 8px; }
-    .step { display: grid; grid-template-columns: 18px 1fr; gap: 10px; }
-    .mark { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; border: 1.5px solid var(--line); color: var(--muted); }
-    .mark.ok { background: var(--ok); border-color: var(--ok); color: var(--paper); }
-    .step p { margin: 2px 0 0; color: var(--muted); word-break: break-word; }
-    .step strong { font-weight: 600; }
-    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    button { font: inherit; font-weight: 600; border-radius: 999px; padding: 6px 12px; border: 1px solid var(--line); background: var(--raised); color: var(--ink); cursor: pointer; }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #18181b; }
-    button:active { transform: translateY(1px); }
-    button:disabled { opacity: .5; cursor: default; }
-    input, textarea, select { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, monospace; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; -webkit-user-select: text; user-select: text; }
-    input:focus, textarea:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 12px; }
-    .help { margin: 4px 0 0; color: var(--muted); font-size: 11.5px; }
-    .error { margin: 6px 0 0; color: #dc2626; font-size: 12px; }
-    .run { padding: 10px 0; border-top: 1px solid var(--line); }
-    .run:first-child { border-top: 0; padding-top: 0; }
-    .run .q { font-weight: 600; }
-    .run .a { color: var(--muted); margin-top: 2px; }
-    .run .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
-    .empty { color: var(--muted); text-align: center; padding: 18px 8px; }
-    footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
-    footer label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
-    footer input { width: auto; }
+    html, body { margin: 0; background: transparent; }
+    html { overflow: hidden; }
+    body {
+      /* Scrolls only when the popover has been capped at the screen's height. */
+      height: 100vh; overflow-y: auto;
+      color: var(--label);
+      font: 13px/1.38 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-user-select: none; user-select: none; cursor: default;
+    }
+    .popover { padding: 12px 0 6px; }
+    .pad { padding: 0 14px; }
     [hidden] { display: none !important; }
+
+    header { display: flex; align-items: center; gap: 10px; padding: 0 14px 10px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); flex: none; }
+    .dot.listening { background: var(--green); }
+    .dot.working { background: var(--orange); animation: pulse 1.4s ease-in-out infinite; }
+    .dot.setup { background: var(--orange); }
+    @keyframes pulse { 50% { opacity: .3; } }
+    @media (prefers-reduced-motion: reduce) { .dot.working { animation: none; } }
+    h1 { margin: 0; font-size: 13px; font-weight: 600; }
+    .sub { color: var(--secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .grow { flex: 1; min-width: 0; }
+
+    hr { border: 0; border-top: 1px solid var(--separator); margin: 6px 14px; }
+    h2 { margin: 8px 14px 4px; font-size: 11px; font-weight: 600; color: var(--secondary); }
+    p { margin: 0; }
+    .secondary { color: var(--secondary); }
+    .note { color: var(--secondary); font-size: 12px; margin-top: 6px; }
+    .error { color: var(--red); font-size: 12px; margin-top: 6px; }
+    code { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--fill); padding: 1px 4px; border-radius: 4px; -webkit-user-select: text; user-select: text; }
+
+    /* Native controls: WebKit draws <button>, <select> and checkboxes as AppKit
+       does, as long as nothing here restyles their bezel. */
+    button, select, input, textarea { font: inherit; }
+    button { margin: 0; }
+    button.default {
+      appearance: none; -webkit-appearance: none;
+      background: var(--accent); color: #fff; border: 0; border-radius: 5px;
+      padding: 2px 10px; min-height: 21px; font-weight: 500;
+      box-shadow: 0 .5px 1px rgba(0, 0, 0, .2), inset 0 .5px 0 rgba(255, 255, 255, .18);
+    }
+    button.default:active { filter: brightness(.92); }
+    button.link {
+      appearance: none; -webkit-appearance: none; background: none; border: 0; padding: 0;
+      color: var(--link); font-size: 12px;
+    }
+    button:disabled { opacity: .5; }
+    /* A ring only when the keyboard put focus there, as in AppKit. */
+    :focus:not(:focus-visible) { outline: none; }
+    .buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+    .buttons.end { justify-content: flex-end; }
+    textarea {
+      display: block; width: 100%; margin-top: 6px; resize: none;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      -webkit-user-select: text; user-select: text;
+    }
+    select { flex: none; }
+    label.check { display: flex; align-items: center; gap: 6px; }
+
+    /* Setup: a checklist. Only the step that needs doing is open. */
+    .steps { list-style: none; margin: 0; padding: 0 14px; }
+    .step { display: grid; grid-template-columns: 20px 1fr; column-gap: 8px; padding: 7px 0; }
+    .step + .step { border-top: 1px solid var(--separator); }
+    .mark {
+      width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+      display: grid; place-items: center; font-size: 11px; font-weight: 600;
+      border: 1.5px solid var(--tertiary); color: var(--secondary);
+    }
+    .step.current .mark { border-color: var(--accent); color: var(--accent); }
+    .step.done .mark { background: var(--green); border-color: var(--green); color: #fff; }
+    .step-title { font-weight: 500; }
+    .step.done .step-title { color: var(--secondary); font-weight: 400; }
+    .step-detail { color: var(--secondary); font-size: 12px; word-break: break-word; }
+    .step-body { grid-column: 2; margin-top: 4px; }
+    .step-body > p { color: var(--secondary); font-size: 12px; }
+
+    .run { padding: 5px 14px; }
+    .run-top { display: flex; align-items: baseline; gap: 8px; }
+    .q { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .when { color: var(--tertiary); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
+    .a { color: var(--secondary); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+    .a.failed { color: var(--red); }
+    .a.stopped { color: var(--tertiary); }
+    .empty { padding: 6px 14px 8px; color: var(--secondary); font-size: 12px; }
+    .active { display: flex; align-items: center; gap: 10px; padding: 5px 14px; }
+    .active .meta { color: var(--secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .row { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 14px; }
+    .row > .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .editor { padding: 0 14px 6px; }
+
+    /* The bottom rows work like menu items. */
+    .menu { padding: 0 5px; }
+    .menu button {
+      appearance: none; -webkit-appearance: none; display: flex; width: 100%; align-items: center;
+      background: none; border: 0; border-radius: 5px; padding: 3px 9px; min-height: 24px;
+      color: var(--label); text-align: left;
+    }
+    .menu button:hover:not(:disabled) { background: var(--hover); }
+    .menu kbd { margin-left: auto; font: inherit; color: var(--tertiary); }
   </style>
 </head>
 <body>
-  <header>
-    <span class="dot" id="dot" aria-hidden="true"></span>
-    <div>
-      <h1 id="headline">Starting</h1>
-      <div class="sub" id="subline"></div>
-    </div>
-  </header>
-
-  <main>
-    <section id="setup" hidden>
-      <h2>Setup</h2>
-      <div class="card step" id="step-fda">
-        <span class="mark" data-mark>1</span>
-        <div>
-          <strong>Let Uplink read Messages</strong>
-          <p data-detail></p>
-          <div class="actions" data-when-todo>
-            <button class="primary" data-action="open-fda">Open Full Disk Access</button>
-          </div>
-          <p class="help" data-when-todo>Switch on Uplink in the list. It notices within a few seconds.</p>
-        </div>
+  <div class="popover" id="popover">
+    <header>
+      <span class="dot" id="dot" aria-hidden="true"></span>
+      <div class="grow">
+        <h1 id="headline">Uplink</h1>
+        <div class="sub" id="subline">Starting</div>
       </div>
-      <div class="card step" id="step-engine">
-        <span class="mark" data-mark>2</span>
-        <div>
-          <strong data-engine-name>Sign in</strong>
-          <p data-detail></p>
-          <div data-when-todo>
-            <label for="engine">Answer texts with</label>
-            <select id="engine"></select>
-            <!-- A missing CLI is not a sign-in problem. Nothing below applies
-                 until it is installed, so the sign-in blocks are hidden. -->
+    </header>
+    <p class="error pad" id="last-error" hidden></p>
+
+    <section id="setup" hidden>
+      <ol class="steps">
+        <li class="step" id="step-fda">
+          <span class="mark" data-mark>1</span>
+          <div>
+            <div class="step-title">Let Uplink read your texts</div>
+            <div class="step-detail" data-detail></div>
+          </div>
+          <div class="step-body" data-body>
+            <p>Turn on Uplink in the list that opens. It notices within a few seconds, with no restart.</p>
+            <div class="buttons"><button class="default" data-action="open-fda">Open Privacy Settings</button></div>
+          </div>
+        </li>
+        <li class="step" id="step-engine">
+          <span class="mark" data-mark>2</span>
+          <div>
+            <div class="step-title" data-engine-name>Sign in</div>
+            <div class="step-detail" data-detail></div>
+          </div>
+          <div class="step-body" data-body>
+            <div class="row" style="padding: 0; margin-bottom: 6px">
+              <label for="engine" class="grow secondary">Answer texts with</label>
+              <span id="engine-home"><select id="engine"></select></span>
+            </div>
+            <!-- A missing CLI is not a sign-in problem, so its instructions
+                 replace the sign-in ones rather than sitting above them. -->
             <div id="engine-missing" hidden>
-              <p class="help"><strong data-missing-label></strong> is not installed on this Mac. Uplink runs it for you, but it cannot install it.</p>
-              <label for="install-command">Install it with</label>
-              <input id="install-command" readonly spellcheck="false">
-              <div class="actions">
-                <button data-action="copy-install">Copy command</button>
-                <button data-action="open-install-docs">Open the docs</button>
-                <button class="primary" data-action="test-engine">Check again</button>
+              <p><strong data-missing-label></strong> is not installed on this Mac. Uplink runs it for you, but it cannot install it.</p>
+              <input id="install-command" readonly spellcheck="false" aria-label="Install command">
+              <div class="buttons">
+                <button data-action="copy-install">Copy</button>
+                <button data-action="open-install-docs">Docs</button>
+                <span class="grow"></span>
+                <button class="default" data-action="test-engine">Check Again</button>
               </div>
             </div>
             <!-- Each CLI signs in its own way, so only the selected one's
                  instructions are shown. -->
             <div data-engine-only="claude">
-              <p class="help">Uplink uses your Claude plan through Claude Code. Run <code>claude setup-token</code>, sign in, and paste the token it prints.</p>
-              <div class="actions"><button data-action="open-terminal">Run it in Terminal</button></div>
-              <label for="token">Token</label>
-              <textarea id="token" rows="3" placeholder="sk-ant-oat01-..." spellcheck="false" autocomplete="off"></textarea>
-              <div class="actions"><button class="primary" data-action="save-token">Save to Keychain</button><button data-action="test-engine">Check again</button></div>
+              <p>Run <code>claude setup-token</code> in Terminal, sign in, and paste the token it prints. Uplink keeps it in your Keychain.</p>
+              <div class="buttons"><button data-action="open-terminal">Open Terminal</button></div>
+              <textarea id="token" rows="2" placeholder="sk-ant-oat01-..." spellcheck="false" autocomplete="off" aria-label="Claude token"></textarea>
               <p class="error" id="token-error" hidden></p>
+              <div class="buttons end">
+                <button data-action="test-engine">Check Again</button>
+                <button class="default" data-action="save-token">Save Token</button>
+              </div>
             </div>
             <div data-engine-only="codex">
-              <p class="help">Uplink uses your ChatGPT plan through Codex. Run <code>codex login</code> and sign in; Codex keeps the credential itself, so there is no token to paste here.</p>
-              <div class="actions"><button data-action="open-terminal">Run it in Terminal</button><button class="primary" data-action="test-engine">Check again</button></div>
+              <p>Run <code>codex login</code> in Terminal and sign in. Codex keeps the credential itself, so there is nothing to paste here.</p>
+              <div class="buttons">
+                <button data-action="open-terminal">Open Terminal</button>
+                <span class="grow"></span>
+                <button class="default" data-action="test-engine">Check Again</button>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-      <div class="card step" id="step-handles">
-        <span class="mark" data-mark>3</span>
-        <div>
-          <strong>Choose who can text it</strong>
-          <p data-detail></p>
-          <label for="allowed">Phone numbers or Apple ID emails, one per line</label>
-          <textarea id="allowed" rows="2" spellcheck="false" placeholder="Empty: your own numbers and emails"></textarea>
-          <p class="help">Anyone listed can make Claude act on this Mac. Leave it empty to allow only yourself.</p>
-          <div class="actions"><button data-action="save-allowed">Save</button></div>
-        </div>
-      </div>
-      <div class="card step" id="step-automation">
-        <span class="mark" data-mark>4</span>
-        <div>
-          <strong>Let Uplink send replies</strong>
-          <p data-detail></p>
-          <div data-when-todo>
-            <p class="help">macOS asks once for permission to control Messages. Do it now, at the Mac: nobody can answer that prompt from a phone, and until it is answered a reply has nowhere to go.</p>
-            <div class="actions">
-              <button class="primary" data-action="test-automation">Ask now</button>
-              <button data-action="open-automation">Open Automation settings</button>
+        </li>
+        <li class="step" id="step-handles">
+          <span class="mark" data-mark>3</span>
+          <div>
+            <div class="step-title">Choose who can text it</div>
+            <div class="step-detail" data-detail></div>
+          </div>
+          <div class="step-body" data-body id="handles-home"></div>
+        </li>
+        <li class="step" id="step-automation">
+          <span class="mark" data-mark>4</span>
+          <div>
+            <div class="step-title">Let Uplink send replies</div>
+            <div class="step-detail" data-detail></div>
+          </div>
+          <div class="step-body" data-body>
+            <p>macOS asks once for permission to control Messages. Do it now, at the Mac: nobody can answer that prompt from a phone, and until it is answered a reply has nowhere to go.</p>
+            <div class="buttons">
+              <button data-action="open-automation">Open Privacy Settings</button>
+              <span class="grow"></span>
+              <button class="default" data-action="test-automation">Ask Now</button>
             </div>
           </div>
-        </div>
-      </div>
+        </li>
+      </ol>
     </section>
 
     <section id="now" hidden>
+      <hr>
       <h2>Working on</h2>
       <div id="active"></div>
     </section>
 
-    <section>
-      <h2>Recent texts</h2>
-      <div class="card" id="recent"><div class="empty">Nothing yet. Text yourself "ping".</div></div>
+    <section id="recent-section" hidden>
+      <hr>
+      <h2>Recent</h2>
+      <div id="recent"></div>
     </section>
-  </main>
 
-  <footer>
-    <label><input type="checkbox" id="login"> Open at login</label>
-    <div class="actions" style="margin: 0">
-      <button data-action="toggle-pause" id="pause">Pause</button>
-      <button data-action="quit">Quit</button>
+    <section id="settings" hidden>
+      <hr>
+      <div class="row">
+        <label for="engine" class="grow">Answer with</label>
+        <span id="engine-settings-home"></span>
+      </div>
+      <div class="row">
+        <span>Who can text it</span>
+        <span class="grow secondary" id="who"></span>
+        <button class="link" data-action="edit-allowed" id="edit-allowed">Change</button>
+      </div>
+      <div id="allowed-settings-home"></div>
+      <div class="row"><label class="check"><input type="checkbox" id="login"> Open at login</label></div>
+    </section>
+
+    <!-- Moved into setup step 3, or under "Who can text it", as the state asks. -->
+    <div class="editor" id="allowed-editor">
+      <textarea id="allowed" rows="2" spellcheck="false" placeholder="Empty: only you" aria-label="Phone numbers or Apple ID emails, one per line"></textarea>
+      <p class="note">Phone numbers or Apple ID emails, one per line. Anyone listed can have Claude act on this Mac, so leave it empty to allow only yourself.</p>
+      <div class="buttons end">
+        <button data-action="cancel-allowed" id="cancel-allowed">Cancel</button>
+        <button class="default" data-action="save-allowed">Save</button>
+      </div>
     </div>
-  </footer>
+
+    <hr>
+    <nav class="menu">
+      <button data-action="toggle-pause" id="pause">Pause Uplink</button>
+      <button data-action="quit">Quit Uplink <kbd>⌘Q</kbd></button>
+    </nav>
+  </div>
 
   <script>
     const craft = globalThis.craft
     const $ = selector => document.querySelector(selector)
     const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
-    const text = value => (value ?? '').toString()
 
+    const WIDTH = 340
     let current = null
     let lastMenu = ''
     let lastIcon = ''
-    let allowedEdited = false
+    let lastTooltip = ''
+    let editingAllowed = false
+    let allowedDirty = false
 
     const ICONS = {
       listening: 'antenna.radiowaves.left.and.right',
@@ -193,23 +334,31 @@
       paused: 'Paused',
     }
 
-    function renderStep(id, check) {
-      const el = $(id)
-      el.querySelector('[data-mark]').classList.toggle('ok', check.ok)
-      el.querySelector('[data-mark]').textContent = check.ok ? '✓' : el.dataset.n || el.querySelector('[data-mark]').textContent
-      el.querySelector('[data-detail]').textContent = check.detail
-      for (const node of el.querySelectorAll('[data-when-todo]'))
-        node.hidden = check.ok
+    /** Moves a control to where the current state wants it; a no-op if it is there. */
+    function place(node, host) {
+      if (node.parentElement !== host)
+        host.appendChild(node)
     }
 
-    /**
-     * The sign-in step follows whichever engine is selected: its name, its
-     * instructions, and nothing belonging to the other one.
-     */
+    function renderSteps(status, byId) {
+      const steps = [['#step-fda', byId.fda], ['#step-engine', byId.engine], ['#step-handles', byId.handles], ['#step-automation', byId.automation]]
+      const firstTodo = steps.findIndex(([, check]) => !check.ok)
+      steps.forEach(([id, check], index) => {
+        const el = $(id)
+        el.classList.toggle('done', check.ok)
+        el.classList.toggle('current', index === firstTodo)
+        el.querySelector('[data-mark]').textContent = check.ok ? '✓' : String(index + 1)
+        el.querySelector('[data-detail]').textContent = check.detail
+        // Only the step to do now is open; a finished one is a line.
+        el.querySelector('[data-body]').hidden = index !== firstTodo
+      })
+      return firstTodo
+    }
+
+    /** The sign-in step follows the selected engine: its name and its instructions. */
     function renderEngine(status, check) {
       const selected = status.settings.engine
-      const label = check?.label || selected
-      $('[data-engine-name]').textContent = `Sign in to ${label}`
+      $('[data-engine-name]').textContent = `Sign in to ${check?.label || selected}`
 
       const picker = $('#engine')
       const options = (status.engines || []).map(engine => engine.id).join(',')
@@ -222,68 +371,122 @@
         }))
         picker.dataset.options = options
       }
-      picker.value = selected
+      if (document.activeElement !== picker)
+        picker.value = selected
 
-      // A missing CLI replaces the sign-in instructions rather than sitting
-      // above them: signing in is not possible until it exists.
+      // Signing in is not possible until the CLI exists, so its instructions
+      // stand in for the sign-in ones.
       const missing = check?.reason === 'missing'
       $('#engine-missing').hidden = !missing
       if (missing) {
-        $('[data-missing-label]').textContent = label
-        $('#install-command').value = check.install?.command || ''
+        $('[data-missing-label]').textContent = check?.label || selected
+        $('#install-command').value = check?.install?.command || ''
       }
 
       for (const node of document.querySelectorAll('[data-engine-only]'))
         node.hidden = missing || node.dataset.engineOnly !== selected
     }
 
+    function whoText(status) {
+      const own = status.settings.allowed.length === 0
+      const handles = status.checks.find(check => check.id === 'handles')
+      if (!handles?.ok)
+        return 'Nobody yet'
+      return own ? 'Only you' : status.settings.allowed.join(', ')
+    }
+
+    function row(className, parts) {
+      const el = document.createElement('div')
+      el.className = className
+      for (const [tag, cls, text] of parts) {
+        const child = document.createElement(tag)
+        child.className = cls
+        child.textContent = text
+        el.appendChild(child)
+      }
+      return el
+    }
+
     function render(status) {
       current = status
+      const setup = status.state === 'setup'
+      const byId = Object.fromEntries(status.checks.map(check => [check.id, check]))
+
       $('#dot').className = `dot ${status.state}`
       $('#headline').textContent = HEADLINES[status.state] || status.state
-      $('#subline').textContent = status.state === 'working' && status.active[0]
-        ? status.active[0].lastActivity
-        : `Uplink ${status.version}`
+      const firstTodo = renderSteps(status, byId)
+      $('#subline').textContent = setup
+        ? `Step ${firstTodo + 1} of 3`
+        : status.state === 'working' && status.active[0]
+          ? status.active[0].lastActivity
+          : status.state === 'paused'
+            ? 'Texts are not being answered'
+            : `Answering texts from ${whoText(status).toLowerCase() === 'only you' ? 'you' : whoText(status)}`
 
-      const byId = Object.fromEntries(status.checks.map(check => [check.id, check]))
-      $('#setup').hidden = status.state !== 'setup'
-      renderStep('#step-fda', byId.fda)
-      renderStep('#step-engine', byId.engine)
-      renderStep('#step-handles', byId.handles)
-      renderStep('#step-automation', byId.automation)
+      $('#last-error').hidden = setup || !status.lastError
+      $('#last-error').textContent = status.lastError || ''
+
+      $('#setup').hidden = !setup
+      $('#settings').hidden = setup
       renderEngine(status, byId.engine)
-      if (!allowedEdited)
-        $('#allowed').value = status.settings.allowed.join('\n')
+      place($('#engine'), setup ? $('#engine-home') : $('#engine-settings-home'))
 
-      $('#now').hidden = status.active.length === 0
-      $('#active').replaceChildren(...status.active.map(run => {
-        const card = document.createElement('div')
-        card.className = 'card'
-        card.innerHTML = '<div class="run"><div class="q"></div><div class="meta"></div></div>'
-        card.querySelector('.q').textContent = run.prompt
-        card.querySelector('.meta').textContent = `${run.elapsed}, ${run.lastActivity}${run.queued ? `, ${run.queued} queued` : ''}`
-        return card
-      }))
-
-      const recent = $('#recent')
-      if (status.recent.length === 0) {
-        recent.innerHTML = '<div class="empty">Nothing yet. Text yourself "ping".</div>'
+      // The allow list: the body of step 3 while setting up, otherwise behind
+      // "Change" under Who can text it.
+      const editor = $('#allowed-editor')
+      if (setup) {
+        place(editor, $('#handles-home'))
+        editor.hidden = false
       }
       else {
-        recent.replaceChildren(...status.recent.map(run => {
-          const row = document.createElement('div')
-          row.className = 'run'
-          row.innerHTML = '<div class="q"></div><div class="a"></div><div class="meta"></div>'
-          row.querySelector('.q').textContent = run.prompt
-          row.querySelector('.a').textContent = run.answer
-          row.querySelector('.meta').textContent = `${run.status}${run.when ? `, ${run.when} ago` : ''}`
-          return row
+        place(editor, $('#allowed-settings-home'))
+        editor.hidden = !editingAllowed
+      }
+      $('#cancel-allowed').hidden = setup
+      $('#edit-allowed').hidden = editingAllowed
+      if (!allowedDirty && document.activeElement !== $('#allowed'))
+        $('#allowed').value = status.settings.allowed.join('\n')
+      $('#who').textContent = whoText(status)
+
+      $('#now').hidden = setup || status.active.length === 0
+      $('#active').replaceChildren(...status.active.map((run) => {
+        const el = document.createElement('div')
+        el.className = 'active'
+        const text = document.createElement('div')
+        text.className = 'grow'
+        text.append(
+          row('run-top', [['span', 'q', run.prompt]]),
+          row('meta', [['span', '', `${run.elapsed}, ${run.lastActivity}${run.queued ? `, ${run.queued} queued` : ''}`]]),
+        )
+        const stop = document.createElement('button')
+        stop.dataset.action = 'stop'
+        stop.textContent = 'Stop'
+        el.append(text, stop)
+        return el
+      }))
+
+      $('#recent-section').hidden = setup
+      // What is running is under Working on; Recent is what has finished.
+      const finished = status.recent.filter(run => run.status !== 'running' && run.status !== 'queued')
+      if (finished.length === 0) {
+        $('#recent').replaceChildren(row('empty', [['span', '', 'No texts yet. Text yourself “ping” from your iPhone to try it.']]))
+      }
+      else {
+        $('#recent').replaceChildren(...finished.slice(0, 5).map((run) => {
+          const el = row('run', [])
+          el.append(
+            row('run-top', [['span', 'q', run.prompt], ['span', 'when', run.when ? `${run.when} ago` : '']]),
+            row(`a ${run.status}`, [['span', '', run.status === 'stopped' ? 'Stopped' : run.status === 'failed' ? `Failed: ${run.answer}` : run.answer || (run.status === 'running' ? 'Working' : '')]]),
+          )
+          return el
         }))
       }
 
       $('#login').checked = status.settings.openAtLogin
-      $('#pause').textContent = status.settings.paused ? 'Resume' : 'Pause'
+      $('#pause').textContent = status.settings.paused ? 'Resume Uplink' : 'Pause Uplink'
+      $('#pause').disabled = setup
       updateTray(status)
+      fit()
     }
 
     function updateTray(status) {
@@ -295,14 +498,20 @@
         craft.tray.setTitle('')
         lastIcon = icon
       }
-      craft.tray.setTooltip(`Uplink: ${HEADLINES[status.state] || status.state}`)
-      // Action names show, hide, toggle and quit are handled natively.
+      const tooltip = `Uplink: ${HEADLINES[status.state] || status.state}`
+      if (tooltip !== lastTooltip) {
+        craft.tray.setTooltip(tooltip)
+        lastTooltip = tooltip
+      }
+      // A left click opens the popover natively (--tray-popover); this menu is
+      // the right click. `quit` is handled natively.
       const menu = [
-        { label: HEADLINES[status.state] || status.state, action: 'noop', enabled: false },
+        { label: `Uplink ${status.version}: ${HEADLINES[status.state] || status.state}`, action: 'noop', enabled: false },
         { type: 'separator' },
         { label: 'Open Uplink', action: 'open' },
-        { label: status.settings.paused ? 'Resume' : 'Pause', action: 'toggle-pause' },
-        { label: `Check ${status.settings.engine === 'codex' ? 'Codex' : 'Claude'} sign-in`, action: 'test-engine' },
+        ...(status.active.length > 0 ? [{ label: 'Stop Current Task', action: 'stop' }] : []),
+        { label: status.settings.paused ? 'Resume' : 'Pause', action: 'toggle-pause', enabled: status.state !== 'setup' },
+        { label: `Check ${status.settings.engine === 'codex' ? 'Codex' : 'Claude'} Sign-in`, action: 'test-engine' },
         { type: 'separator' },
         { label: 'Quit Uplink', action: 'quit', shortcut: 'q' },
       ]
@@ -313,25 +522,23 @@
       }
     }
 
-    function place() {
-      // Under the menu bar at the right, where the status item lives. Craft
-      // has no popover anchored to the item. The bridge takes (x, y) as two
-      // numbers - an object silently became (100, 100) - and y is the window's
-      // top edge measured up from the bottom of the screen.
-      const width = 380
-      const x = Math.max(0, screen.width - width - 10)
-      const y = screen.height - (screen.availTop || 25) - 6
-      craft?.window?.setPosition?.(x, y)
+    /**
+     * Size the popover to what it shows, as a real one does, up to the height
+     * of the screen; past that the page scrolls. Craft keeps it hung from the
+     * status item as it grows and shrinks.
+     */
+    let lastHeight = 0
+    function fit() {
+      if (!craft?.window?.setSize)
+        return
+      const max = Math.max(240, (screen.availHeight || 800) - 40)
+      const height = Math.min(Math.ceil($('#popover').getBoundingClientRect().height), max)
+      if (Math.abs(height - lastHeight) > 1) {
+        lastHeight = height
+        craft.window.setSize(WIDTH, height)
+      }
     }
-
-    let shown = false
-    function show() {
-      place()
-      craft?.window?.show?.()
-      // Take focus, so clicking elsewhere (blur) is what closes it.
-      craft?.window?.focus?.()
-      shown = true
-    }
+    new ResizeObserver(fit).observe($('#popover'))
 
     async function refresh() {
       try {
@@ -339,28 +546,44 @@
       }
       catch {
         $('#headline').textContent = 'Uplink is not responding'
+        $('#subline').textContent = 'Quit it from the menu and open it again.'
       }
     }
 
+    const open = () => craft?.window?.show?.()
+    const hide = () => craft?.window?.hide?.()
+    const quit = () => api('/api/quit', {}).catch(() => {}).finally(() => craft?.app?.quit?.())
+
     const actions = {
-      'open': () => show(),
+      'open': open,
+      'noop': () => {},
       'open-fda': () => api('/api/open/full-disk-access', {}),
       'open-terminal': () => api('/api/open/terminal', {}),
-      'test-engine': () => api('/api/engine/test', {}).then(refresh),
+      'test-engine': async () => {
+        const detail = $('#step-engine [data-detail]')
+        detail.textContent = 'Checking'
+        await api('/api/engine/test', {})
+        await refresh()
+      },
       'copy-install': async () => {
         const field = $('#install-command')
         field.select()
-        // The webview may refuse the async clipboard API without a secure
-        // origin, so fall back to the selection the person can copy themselves.
+        // The webview can refuse the async clipboard API, so leave the command
+        // selected for the person to copy either way.
         try {
           await navigator.clipboard.writeText(field.value)
         }
         catch {}
       },
       'open-install-docs': () => api('/api/open/install-docs', {}),
-      // Raises the macOS prompt if it has never been answered, and re-reads the
-      // grant if it has.
-      'test-automation': () => api('/api/automation/test', {}).then(refresh),
+      // Raises the macOS prompt when it has never been answered, and re-reads
+      // the grant when it has.
+      'test-automation': async () => {
+        const detail = $('#step-automation [data-detail]')
+        detail.textContent = 'Checking'
+        await api('/api/automation/test', {})
+        await refresh()
+      },
       'open-automation': () => api('/api/open/automation', {}),
       'save-token': async () => {
         const error = $('#token-error')
@@ -375,51 +598,76 @@
         }
         await refresh()
       },
-      'save-allowed': async () => {
-        allowedEdited = false
-        render(await api('/api/settings', { allowed: $('#allowed').value.split('\n') }))
+      'edit-allowed': () => {
+        editingAllowed = true
+        render(current)
+        $('#allowed').focus()
       },
+      'cancel-allowed': () => {
+        editingAllowed = false
+        allowedDirty = false
+        render(current)
+      },
+      'save-allowed': async () => {
+        const status = await api('/api/settings', { allowed: $('#allowed').value.split('\n') })
+        editingAllowed = false
+        allowedDirty = false
+        render(status)
+      },
+      'stop': async () => render(await api('/api/stop', {})),
       'toggle-pause': async () => render(await api('/api/settings', { paused: !current?.settings.paused })),
-      'quit': () => (craft?.app?.quit ? craft.app.quit() : api('/api/quit', {})),
+      'quit': quit,
     }
 
     document.addEventListener('click', (event) => {
       const button = event.target.closest('[data-action]')
-      if (!button)
+      if (!button || button.disabled)
         return
       button.disabled = true
       Promise.resolve(actions[button.dataset.action]?.()).finally(() => { button.disabled = false })
     })
-    $('#allowed').addEventListener('input', () => { allowedEdited = true })
-    // Switching engines restarts the watcher and re-probes, so the answer comes
+    $('#allowed').addEventListener('input', () => { allowedDirty = true })
+    // Switching engines restarts the watcher and re-probes; the answer comes
     // back in the same response.
     $('#engine').addEventListener('change', async event => render(await api('/api/settings', { engine: event.target.value })))
     $('#login').addEventListener('change', async event => render(await api('/api/settings', { openAtLogin: event.target.checked })))
 
+    // The keys a popover answers to.
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' || (event.metaKey && event.key === 'w')) {
+        event.preventDefault()
+        hide()
+      }
+      else if (event.metaKey && event.key === 'q') {
+        event.preventDefault()
+        quit()
+      }
+    })
+
     if (craft?.tray) {
-      craft.tray.onClick(() => {
-        if (shown) {
-          craft.window.hide()
-          shown = false
-        }
-        else {
-          show()
-        }
-      })
       craft.tray.onMenuAction((detail) => {
         const action = typeof detail === 'string' ? detail : detail?.action
         actions[action]?.()
       })
-      craft.window?.onBlur?.(() => {
-        craft.window.hide()
-        shown = false
-      })
     }
+    // Opening it should show now, not the last poll. And the window taking the
+    // keyboard moves focus onto its first button, which WebKit then rings as if
+    // it had been tabbed to; a popover opens with nothing focused.
+    let pointerAt = 0
+    document.addEventListener('pointerdown', () => { pointerAt = Date.now() }, true)
+    craft?.window?.onFocus?.(() => {
+      refresh()
+      setTimeout(() => {
+        // Unless the click that opened it was on that very control.
+        if (Date.now() - pointerAt > 500 && document.activeElement !== document.body)
+          document.activeElement?.blur()
+      }, 0)
+    })
 
     // Setup needs the person, so the popover opens itself until it is done.
     refresh().then(() => {
       if (current?.state === 'setup')
-        show()
+        open()
     })
     setInterval(refresh, 2000)
   </script>
