@@ -1,6 +1,8 @@
+import type { EngineId } from './engine'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { isEngineId } from './engine'
 
 /**
  * Settings for the downloadable app, which has no .env: a JSON file for
@@ -17,12 +19,16 @@ export const DATABASE_PATH = join(DATA_DIR, 'uplink.sqlite')
 export const LOG_PATH = join(homedir(), 'Library', 'Logs', 'Uplink.log')
 
 const KEYCHAIN_SERVICE = 'com.stacksjs.uplink'
+// Claude Code's token. Codex keeps its own credentials in CODEX_HOME via
+// `codex login`, so there is nothing of its to store here.
 const KEYCHAIN_ACCOUNT = 'claude-oauth-token'
 
 export interface Settings {
   /** Handles allowed to command Uplink. Empty: this Mac's own handles. */
   allowed: string[]
-  /** Model alias for runs, or null for the CLI's default. */
+  /** Which agent CLI answers a text. */
+  engine: EngineId
+  /** Claude's model alias for runs, or null for the CLI's default. */
   model: string | null
   /** Where a run starts when a text names no path. */
   workdir: string
@@ -34,6 +40,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   allowed: [],
+  engine: 'claude',
   model: null,
   workdir: homedir(),
   openAtLogin: true,
@@ -45,7 +52,12 @@ export function readSettings(path: string = SETTINGS_PATH): Settings {
     return { ...DEFAULT_SETTINGS }
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Settings>
-    return { ...DEFAULT_SETTINGS, ...parsed }
+    const settings = { ...DEFAULT_SETTINGS, ...parsed }
+    // A hand-edited or downgraded file can name an engine this build does not
+    // have. Falling back beats refusing to start.
+    if (!isEngineId(String(settings.engine)))
+      settings.engine = DEFAULT_SETTINGS.engine
+    return settings
   }
   catch {
     // A hand-edited file with a typo must not stop the app from starting.
@@ -65,6 +77,7 @@ export function writeSettings(settings: Settings, path: string = SETTINGS_PATH):
 export function settingsEnv(settings: Settings, env: Record<string, string | undefined> = process.env): Record<string, string | undefined> {
   return {
     UPLINK_ALLOWED: settings.allowed.join(','),
+    UPLINK_ENGINE: settings.engine,
     UPLINK_MODEL: settings.model ?? '',
     UPLINK_WORKDIR: settings.workdir,
     ...Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith('UPLINK_'))),

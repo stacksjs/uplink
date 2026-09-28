@@ -1,9 +1,9 @@
 import type { UplinkConfig } from './config'
+import type { Engine } from './engine'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import process from 'node:process'
-import { formatDuration, truncate } from './format'
+import { allEngines } from './engines'
+import { formatDuration } from './format'
 import { MessagesDb } from './messages-db'
 import { servicePaths, serviceState } from './service'
 
@@ -18,6 +18,16 @@ export interface Check {
   ok: boolean
   detail: string
   fix?: string
+  /**
+   * Shown, but not counted towards whether Uplink is ready. An engine the
+   * person has not selected belongs here: it is information, not a problem.
+   */
+  informational?: boolean
+}
+
+/** Whether every check that counts passed. */
+export function checksPass(checks: Check[]): boolean {
+  return checks.every(check => check.ok || check.informational)
 }
 
 export interface Heartbeat {
@@ -51,34 +61,14 @@ export async function readHeartbeat(appDir: string): Promise<Heartbeat | null> {
 const HEARTBEAT_STALE_MS = 2 * 60_000
 
 /**
- * Whether the claude CLI can actually answer, checked with one real turn.
- *
- * Only asking "is a token set" passed a token truncated at the terminal's
- * 80-column wrap: set, well-formed, and rejected with a 401 on first use.
+ * What to do about an engine that cannot answer. The engine's own
+ * `authFailureHint` is written for a text message, so it names the CLI and the
+ * command but not the surrounding `.env` step this install needs.
  */
-async function claudeAuth(bin: string): Promise<{ ok: boolean, detail: string }> {
-  try {
-    const proc = Bun.spawn([bin, '-p', 'Reply with exactly: ok', '--model', 'haiku', '--output-format', 'json'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      cwd: tmpdir(),
-    })
-    const timer = setTimeout(() => proc.kill(), 60_000)
-    const text = await new Response(proc.stdout).text()
-    clearTimeout(timer)
-    await proc.exited
-    const result = JSON.parse(text) as { is_error?: boolean, result?: string }
-    const via = process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'the CLI login'
-    if (!result.is_error)
-      return { ok: true, detail: `answers (via ${via})` }
-    const hint = process.env.CLAUDE_CODE_OAUTH_TOKEN
-      ? ` - the token is ${process.env.CLAUDE_CODE_OAUTH_TOKEN.length} characters; a paste cut at a line wrap is the usual cause`
-      : ''
-    return { ok: false, detail: `${truncate(result.result ?? 'no answer', 120)}${hint}` }
-  }
-  catch (error) {
-    return { ok: false, detail: `could not run ${bin}: ${error instanceof Error ? error.message : String(error)}` }
-  }
+function engineFix(engine: Engine): string {
+  return engine.id === 'claude'
+    ? 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart'
+    : 'Run codex login (or codex login --device-auth if you are on SSH), then ./buddy uplink:restart'
 }
 
 export async function runChecks(config: UplinkConfig, appDir: string): Promise<Check[]> {
@@ -123,10 +113,24 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
     ? { name: 'Who can text it', ok: true, detail: config.allowed.length > 0 ? `UPLINK_ALLOWED: ${allowed.join(', ')}` : `your own handles: ${allowed.join(', ')}` }
     : { name: 'Who can text it', ok: false, detail: 'nobody yet', fix: 'Set UPLINK_ALLOWED in .env to your phone number (and/or Apple ID email)' })
 
-  const auth = await claudeAuth(config.claudeBin)
-  checks.push(auth.ok
-    ? { name: 'Claude account', ok: true, detail: auth.detail }
-    : { name: 'Claude account', ok: false, detail: auth.detail, fix: 'Run claude setup-token, copy the WHOLE token (it can wrap onto a second line), then ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN <token> and ./buddy uplink:restart' })
+  // One check per engine. Only the selected one is allowed to fail the doctor:
+  // a person using Codex has done nothing wrong by never signing in to Claude,
+  // and seeing the other engine listed is how they learn they can switch.
+  for (const engine of allEngines(config)) {
+    const selected = engine.id === config.engine
+    const probe = await engine.probe()
+    checks.push({
+      name: selected ? `${engine.label} account` : `${engine.label} (available, not selected)`,
+      ok: probe.ok,
+      detail: probe.detail,
+      informational: !selected,
+      fix: probe.ok
+        ? undefined
+        : selected
+          ? engineFix(engine)
+          : `Optional. To use it, set UPLINK_ENGINE=${engine.id} in .env, then: ${engineFix(engine)}`,
+    })
+  }
 
   const messages = Bun.spawnSync(['pgrep', '-x', 'Messages'])
   checks.push(messages.exitCode === 0

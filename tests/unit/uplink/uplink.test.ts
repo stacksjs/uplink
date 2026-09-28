@@ -190,12 +190,15 @@ describe('Uplink', () => {
     expect(h.engine.runs[1].request.sessionId).toBeNull()
   })
 
-  it('tells the user when the claude CLI is not logged in', async () => {
+  it('tells the user which CLI is not logged in, and how to fix it', async () => {
     const h = await harness()
     h.fake.add({ chat: ME, text: 'hello', fromMe: true })
     await h.uplink.tick()
     h.engine.finish(0, 'Failed to authenticate', { ok: false, authFailure: true })
     await settle()
+    // The remedy comes from the engine, so a Codex install is told about Codex
+    // rather than about a claude token and a .env the app does not have.
+    expect(h.sender.texts()[0]).toContain('Claude Code')
     expect(h.sender.texts()[0]).toContain('claude setup-token')
     expect(h.store.runs.get(1)?.status).toBe('failed')
   })

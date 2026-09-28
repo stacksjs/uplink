@@ -366,8 +366,12 @@ export class Uplink {
     })
 
     if (!active.stoppedByUser) {
+      // Naming the wrong CLI, or a .env the downloadable app does not have,
+      // sends someone at the Mac to fix something that is not broken. The
+      // engine carries its own remedy.
+      const engine = this.deps.engine
       const text = result.authFailure
-        ? 'I cannot reach Claude: the claude CLI on the Mac is not logged in. Someone at the Mac needs to run "claude setup-token" and put the token in Uplink\'s .env.'
+        ? `I cannot reach ${engine.label}: it is not signed in on this Mac. Someone there needs to ${engine.authFailureHint}.`
         : result.ok ? result.text : `That failed: ${result.text}`
       await this.reply(active.target, text, { keepRest: true })
     }

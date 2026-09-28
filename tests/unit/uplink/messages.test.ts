@@ -107,8 +107,18 @@ describe('classify', () => {
     expect(classify({ ...base, chatIdentifier: ME, chatGuid: `iMessage;-;${ME}`, sender: FRIEND }, selfCtx)).toEqual({ accept: false, reason: 'sender mismatch' })
   })
 
+  it('refuses SMS even from an allowed handle, because sender IDs are spoofable', () => {
+    // With Text Message Forwarding on, a forwarded SMS is a direct chat whose
+    // identifier is the sender's number, so every other check here passes.
+    expect(classify({ ...base, service: 'SMS' }, ctx)).toEqual({ accept: false, reason: 'not iMessage' })
+    expect(classify({ ...base, service: 'SMS', chatIdentifier: ME, chatGuid: `SMS;-;${ME}`, isFromMe: true, sender: null }, ctx))
+      .toEqual({ accept: false, reason: 'not iMessage' })
+  })
+
   it('fails closed on everything else', () => {
     const rejected: Array<[Partial<IncomingMessage>, string]> = [
+      [{ service: 'SMS' }, 'not iMessage'],
+      [{ service: 'RCS' }, 'not iMessage'],
       [{ chatIdentifier: '+15559999999', sender: '+15559999999' }, 'chat not allowed'],
       [{ chatStyle: 43 }, 'group chat'],
       [{ isFromMe: true, sender: null }, 'outgoing message'],

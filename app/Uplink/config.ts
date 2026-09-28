@@ -1,6 +1,10 @@
+import type { CodexPermission } from './codex-engine'
+import type { EngineId } from './engine'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
+import { CODEX_PERMISSIONS } from './codex-engine'
+import { isEngineId } from './engine'
 import { parseHandleList } from './handles'
 import { DEFAULT_MESSAGES_DB } from './messages-db'
 
@@ -23,9 +27,16 @@ export interface UplinkConfig {
   /** A thread idle longer than this starts a fresh agent session. */
   sessionIdleMs: number
   workdir: string
+  /** Which agent CLI answers a text, unless a thread says otherwise. */
+  engine: EngineId
   claudeBin: string
-  model: string | null
+  claudeModel: string | null
+  /** How much Claude Code may do without asking. */
   permissionMode: string
+  codexBin: string
+  codexModel: string | null
+  /** How much Codex may do without asking. The two CLIs spell this differently. */
+  codexPermission: CodexPermission
   timeoutMs: number
 }
 
@@ -62,11 +73,29 @@ export function loadConfig(env: Env = process.env): UplinkConfig {
     progressEveryMs: int(env, 'UPLINK_PROGRESS_EVERY_MS', 10 * MINUTE),
     sessionIdleMs: int(env, 'UPLINK_SESSION_IDLE_MS', 6 * 60 * MINUTE),
     workdir: expandHome(str(env, 'UPLINK_WORKDIR', homedir())),
+    engine: engineId(env.UPLINK_ENGINE),
     claudeBin: expandHome(str(env, 'UPLINK_CLAUDE_BIN', findClaude())),
-    model: env.UPLINK_MODEL || null,
+    // UPLINK_MODEL predates the second engine and meant Claude's model alias,
+    // so an existing .env keeps working.
+    claudeModel: env.UPLINK_CLAUDE_MODEL || env.UPLINK_MODEL || null,
     permissionMode: str(env, 'UPLINK_PERMISSION_MODE', 'bypassPermissions'),
+    codexBin: expandHome(str(env, 'UPLINK_CODEX_BIN', findCodex())),
+    codexModel: env.UPLINK_CODEX_MODEL || null,
+    codexPermission: codexPermission(env.UPLINK_CODEX_PERMISSION),
     timeoutMs: int(env, 'UPLINK_TIMEOUT_MS', 90 * MINUTE),
   }
+}
+
+function engineId(value: string | undefined): EngineId {
+  return value && isEngineId(value) ? value : 'claude'
+}
+
+function codexPermission(value: string | undefined): CodexPermission {
+  return value && (CODEX_PERMISSIONS as readonly string[]).includes(value)
+    ? value as CodexPermission
+    // Claude Code runs with bypassPermissions, because nobody is at the Mac to
+    // approve anything. Codex's equivalent is the same trade, spelled its way.
+    : 'bypass'
 }
 
 /**
@@ -87,6 +116,29 @@ function findClaude(): string {
       return candidate
   }
   return 'claude'
+}
+
+/**
+ * The same bare-PATH problem as findClaude, plus one path that is easy to miss:
+ * the ChatGPT desktop app bundles its own codex binary and does not put it on
+ * PATH. On a Mac with ChatGPT installed that is the working Codex, so a search
+ * that skips it reports Codex missing on a machine that has it.
+ */
+function findCodex(): string {
+  const fromPath = Bun.which('codex')
+  if (fromPath)
+    return fromPath
+  for (const candidate of [
+    '/Applications/ChatGPT.app/Contents/Resources/codex',
+    join(homedir(), '.local', 'bin', 'codex'),
+    join(homedir(), '.bun', 'bin', 'codex'),
+    '/opt/homebrew/bin/codex',
+    '/usr/local/bin/codex',
+  ]) {
+    if (Bun.file(candidate).size > 0)
+      return candidate
+  }
+  return 'codex'
 }
 
 export function systemPrompt(config: UplinkConfig): string {

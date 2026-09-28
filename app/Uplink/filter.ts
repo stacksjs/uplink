@@ -9,6 +9,7 @@ import { CHAT_STYLE_DIRECT } from './messages-db'
  * rule is an allowlist, never a denylist, and every check fails closed.
  *
  * A message is a command when ALL of these hold:
+ *  - it arrived over iMessage, never SMS (see below),
  *  - it is in a one-to-one chat (never a group: anyone could be added to one),
  *  - that chat is with an allowed handle,
  *  - it was sent BY that handle - or, in a chat with one of this Mac's own
@@ -33,7 +34,26 @@ export type Verdict =
   | { accept: true, text: string }
   | { accept: false, reason: string }
 
+/**
+ * Only iMessage carries an identity worth trusting.
+ *
+ * With Text Message Forwarding on, which is the default once an iPhone is
+ * paired and is the setup this product assumes, forwarded SMS lands in chat.db
+ * as a direct chat whose identifier is the sender's number. SMS sender IDs are
+ * spoofable through commodity bulk-SMS gateways; iMessage sender IDs are not.
+ * Without this check, anyone who knows the owner's phone number could send one
+ * SMS that passes every other test here and reaches an agent running with
+ * approvals disabled in the owner's home directory.
+ *
+ * iMessage is also the only service that reaches this Mac over satellite, which
+ * is what Uplink is for, so nothing real is lost.
+ */
+const COMMAND_SERVICE = 'iMessage'
+
 export function classify(message: IncomingMessage, ctx: FilterContext): Verdict {
+  if (message.service !== COMMAND_SERVICE)
+    return { accept: false, reason: `not ${COMMAND_SERVICE}` }
+
   if (message.chatStyle !== CHAT_STYLE_DIRECT)
     return { accept: false, reason: 'group chat' }
 

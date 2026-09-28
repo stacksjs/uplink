@@ -141,6 +141,20 @@ interface PendingRun {
 /** An engine whose runs finish when the test says so. */
 export class FakeEngine implements Engine {
   runs: PendingRun[] = []
+  probes = 0
+
+  // Identity matching the real Claude engine, so a test that asserts on a
+  // reply naming the CLI is asserting the text a user would actually get.
+  readonly id = 'claude' as const
+  readonly label = 'Claude Code'
+  readonly authFailureHint = 'run "claude setup-token" on the Mac and give Uplink the token'
+
+  probeResult: { ok: boolean, detail: string } = { ok: true, detail: 'Signed in' }
+
+  async probe(): Promise<{ ok: boolean, detail: string }> {
+    this.probes += 1
+    return this.probeResult
+  }
 
   run(request: EngineRequest): EngineRun {
     let resolve!: (result: EngineResult) => void
