@@ -89,6 +89,8 @@ export class Uplink {
   private timer: ReturnType<typeof setTimeout> | null = null
   lastPollAt: number | null = null
   lastError: string | null = null
+  /** Why the last reply could not be delivered, for the heartbeat and the popover. */
+  lastSendError: string | null = null
   private ticking = false
   private stopped = false
 
@@ -373,7 +375,16 @@ export class Uplink {
       const text = result.authFailure
         ? `I cannot reach ${engine.label}: it is not signed in on this Mac. Someone there needs to ${engine.authFailureHint}.`
         : result.ok ? result.text : `That failed: ${result.text}`
-      await this.reply(active.target, text, { keepRest: true })
+
+      // A run whose answer never left the Mac is not done, whatever the agent
+      // did. Recording it as done is how a first install reports itself healthy
+      // while the phone hears nothing.
+      if (!await this.reply(active.target, text, { keepRest: true })) {
+        await this.deps.store.updateRun(active.runId, {
+          status: 'failed',
+          error: `The answer could not be delivered through Messages: ${this.lastSendError ?? 'unknown error'}`,
+        })
+      }
     }
 
     const next = state.queue.shift()
@@ -437,7 +448,7 @@ export class Uplink {
    * and easy to lose track of. Short status replies never touch the stored
    * conversation, so one sent mid-run cannot race the run's own save.
    */
-  async reply(target: ReplyTarget, text: string, options: { keepRest?: boolean } = {}): Promise<void> {
+  async reply(target: ReplyTarget, text: string, options: { keepRest?: boolean } = {}): Promise<boolean> {
     const parts = chunk(toPlainText(text), this.config.maxChars - this.config.replyPrefix.length)
     const now = parts.slice(0, this.config.maxParts)
     const later = parts.slice(this.config.maxParts)
@@ -456,10 +467,13 @@ export class Uplink {
         await this.deps.sender.send(target, body)
       }
       catch (error) {
-        this.log.error(`Reply to ${target.handle} failed: ${error instanceof Error ? error.message : String(error)}`)
-        return
+        this.lastSendError = error instanceof Error ? error.message : String(error)
+        this.log.error(`Reply to ${target.handle} failed: ${this.lastSendError}`)
+        return false
       }
     }
+    this.lastSendError = null
+    return true
   }
 }
 

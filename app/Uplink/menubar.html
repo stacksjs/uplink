@@ -134,6 +134,20 @@
           <div class="actions"><button data-action="save-allowed">Save</button></div>
         </div>
       </div>
+      <div class="card step" id="step-automation">
+        <span class="mark" data-mark>4</span>
+        <div>
+          <strong>Let Uplink send replies</strong>
+          <p data-detail></p>
+          <div data-when-todo>
+            <p class="help">macOS asks once for permission to control Messages. Do it now, at the Mac: nobody can answer that prompt from a phone, and until it is answered a reply has nowhere to go.</p>
+            <div class="actions">
+              <button class="primary" data-action="test-automation">Ask now</button>
+              <button data-action="open-automation">Open Automation settings</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="now" hidden>
@@ -236,6 +250,7 @@
       renderStep('#step-fda', byId.fda)
       renderStep('#step-engine', byId.engine)
       renderStep('#step-handles', byId.handles)
+      renderStep('#step-automation', byId.automation)
       renderEngine(status, byId.engine)
       if (!allowedEdited)
         $('#allowed').value = status.settings.allowed.join('\n')
@@ -343,6 +358,10 @@
         catch {}
       },
       'open-install-docs': () => api('/api/open/install-docs', {}),
+      // Raises the macOS prompt if it has never been answered, and re-reads the
+      // grant if it has.
+      'test-automation': () => api('/api/automation/test', {}).then(refresh),
+      'open-automation': () => api('/api/open/automation', {}),
       'save-token': async () => {
         const error = $('#token-error')
         error.hidden = true

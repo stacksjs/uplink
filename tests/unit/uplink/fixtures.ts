@@ -1,5 +1,5 @@
 import type { Engine, EngineEvent, EngineProbe, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
-import type { ReplyTarget, Sender } from '../../../app/Uplink/sender'
+import type { AutomationState, ReplyTarget, Sender } from '../../../app/Uplink/sender'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -119,10 +119,20 @@ export class FakeChatDb {
 
 export class FakeSender implements Sender {
   sent: Array<{ target: ReplyTarget, text: string }> = []
+  /** Set to make every send fail, the way a refused Automation grant does. */
+  refuse: string | null = null
+  automation: AutomationState = { ok: true, reason: 'ok', detail: 'Uplink can send through Messages' }
+
   /** Mirror each send into chat.db, the way Messages records it. */
   constructor(private readonly db?: FakeChatDb) {}
 
+  async canSend(): Promise<AutomationState> {
+    return this.automation
+  }
+
   async send(target: ReplyTarget, text: string): Promise<void> {
+    if (this.refuse)
+      throw new Error(this.refuse)
     this.sent.push({ target, text })
     this.db?.add({ chat: target.handle, text, fromMe: true })
   }

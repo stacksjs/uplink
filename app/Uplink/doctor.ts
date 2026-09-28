@@ -35,6 +35,10 @@ export interface Heartbeat {
   startedAt: number
   lastPollAt: number | null
   lastError: string | null
+  /** Whether the watcher itself can drive Messages. Null before it has asked. */
+  automation: { ok: boolean, detail: string } | null
+  /** Why the last reply could not be delivered, if one could not. */
+  lastSendError: string | null
   allowed: string[]
   own: string[]
   active: Array<{ prompt: string, startedAt: number, lastActivity: string | null, queued: number }>
@@ -150,7 +154,28 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
     ? { name: 'Messages app', ok: true, detail: 'running' }
     : { name: 'Messages app', ok: false, detail: 'not running', fix: 'Open Messages and sign in with your Apple ID' })
 
-  checks.push({ name: 'Sending replies', ok: true, detail: 'macOS asks once, on the first reply, to let Uplink control Messages - click Allow' })
+  // The Automation grant is per app: the watcher inside Uplink.app and this
+  // command under Terminal are different subjects. Only the watcher's answer is
+  // about the thing that will actually send, so ask the heartbeat rather than
+  // measuring this process and reporting it as Uplink's.
+  if (fresh && heartbeat.automation) {
+    checks.push(heartbeat.automation.ok
+      ? { name: 'Sending replies', ok: true, detail: heartbeat.automation.detail }
+      : {
+          name: 'Sending replies',
+          ok: false,
+          detail: heartbeat.lastSendError ?? heartbeat.automation.detail,
+          fix: `Allow ${paths.bundle} to control Messages in System Settings > Privacy & Security > Automation, then ./buddy uplink:restart. macOS asks once; if it was declined, the switch is in that pane.`,
+        })
+  }
+  else {
+    checks.push({
+      name: 'Sending replies',
+      ok: false,
+      detail: 'not checked: the watcher is not running, and only it can prove Uplink.app may control Messages',
+      fix: 'Start it with ./buddy uplink:install, then run this again',
+    })
+  }
 
   return checks
 }

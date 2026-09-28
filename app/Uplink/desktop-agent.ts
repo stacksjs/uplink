@@ -2,6 +2,7 @@
 import type { Server } from 'bun'
 import type { UplinkConfig } from './config'
 import type { EngineId, EngineInstall, EngineProbe, ProbeReason } from './engine'
+import type { AutomationState } from './sender'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -161,6 +162,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   if (settings.openAtLogin && (!existsSync(LAUNCH_AGENT) || !readFileSync(LAUNCH_AGENT, 'utf8').includes(`<string>${process.execPath}</string>`)))
     setOpenAtLogin(true)
 
+  const sender = new AppleScriptSender()
   const store = new SqliteStore(DATABASE_PATH)
   const startedAt = Date.now()
   let messages: MessagesDb | null = null
@@ -168,6 +170,17 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   let uplink: Uplink | null = null
   const engines = new Map<string, EngineState>()
   let checkingEngines = false
+  let automation: AutomationState | null = null
+
+  /**
+   * Whether macOS will let this app drive Messages. This process is Uplink.app,
+   * so unlike `buddy uplink:doctor` under Terminal it is the right subject to
+   * ask. The first call raises the prompt, which is why setup calls it rather
+   * than leaving it to the first real reply.
+   */
+  const checkAutomation = async (): Promise<void> => {
+    automation = await sender.canSend()
+  }
 
   /**
    * Probe every engine, not only the selected one: the popover shows the other
@@ -198,7 +211,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       messagesError = error instanceof MessagesAccessError ? 'Uplink needs Full Disk Access to read Messages.' : String(error)
       return
     }
-    uplink = new Uplink({ config, messages, sender: new AppleScriptSender(), engine: selectedEngine(config), store })
+    uplink = new Uplink({ config, messages, sender, engine: selectedEngine(config), store })
     await uplink.start()
   }
 
@@ -218,10 +231,16 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   const keepMessagesOpen = setInterval(() => {
     if (uplink && Bun.spawnSync(['pgrep', '-x', 'Messages']).exitCode !== 0)
       Bun.spawnSync(['open', '-g', '-a', 'Messages'])
+    // Re-ask while the answer is anything but yes. A refusal only changes in
+    // System Settings, and a timeout from a Messages that was still starting
+    // should not leave the app stuck in setup for ever.
+    if (!automation?.ok)
+      void checkAutomation()
   }, 15_000)
 
   await startWatching()
   void checkEngines()
+  void checkAutomation()
 
   const status = () => {
     const recent = store.recentRuns(8).map(run => ({
@@ -271,6 +290,16 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         name: 'Who can text it',
         ok: allowed.length > 0,
         detail: allowed.length > 0 ? allowed.join(', ') : 'No handles yet. Sign in to Messages, or add your number.',
+        informational: false,
+      },
+      {
+        // The outbound half of the chain. Without this the app reported itself
+        // ready while every reply was refused, so a first text produced a run
+        // marked done and a phone that heard nothing.
+        id: 'automation',
+        name: 'Send replies',
+        ok: automation?.ok ?? false,
+        detail: uplink?.lastSendError ?? automation?.detail ?? 'Not checked yet',
         informational: false,
       },
     ]
@@ -324,6 +353,15 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
         case '/api/open/full-disk-access':
           Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'])
           return json({ ok: true })
+
+        case '/api/automation/test':
+          await checkAutomation()
+          return json(automation)
+
+        case '/api/open/automation': {
+          Bun.spawnSync(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'])
+          return json({ ok: true })
+        }
 
         case '/api/open/install-docs': {
           // The selected engine's own documentation, so the link cannot drift

@@ -190,6 +190,23 @@ describe('Uplink', () => {
     expect(h.engine.runs[1].request.sessionId).toBeNull()
   })
 
+  it('does not record a run as done when the reply could not be delivered', async () => {
+    const h = await harness()
+    // What a refused Messages Automation grant looks like from here. Without
+    // this the run was recorded done, the dashboard showed an answer, and the
+    // phone heard nothing at all.
+    h.sender.refuse = 'Messages refused to send (osascript exit 1): not authorized to send Apple events'
+    h.fake.add({ chat: ME, text: 'hello', fromMe: true })
+    await h.uplink.tick()
+    h.engine.finish(0, 'Here are the scores')
+    await settle()
+
+    expect(h.sender.texts()).toEqual([])
+    expect(h.store.runs.get(1)?.status).toBe('failed')
+    expect(h.store.runs.get(1)?.error).toContain('could not be delivered')
+    expect(h.uplink.lastSendError).toContain('not authorized')
+  })
+
   it('tells the user which CLI is not logged in, and how to fix it', async () => {
     const h = await harness()
     h.fake.add({ chat: ME, text: 'hello', fromMe: true })
