@@ -1,89 +1,81 @@
 import type { CodexPermission } from './codex-engine'
 import type { EngineId } from './engine'
+import type { UplinkConfig } from './types'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
+import { applyEnvVarsToConfig } from 'bunfig'
+import defaults from '../../config/uplink'
 import { CODEX_PERMISSIONS } from './codex-engine'
 import { isEngineId } from './engine'
 import { parseHandleList } from './handles'
-import { DEFAULT_MESSAGES_DB } from './messages-db'
 
-export interface UplinkConfig {
-  /** Handles allowed to command Uplink. Empty means "my own handles only". */
-  allowed: string[]
-  messagesDb: string
-  pollMs: number
-  /** On start, ignore commands older than this, so a Mac waking up does not replay a day of texts. */
-  catchUpMs: number
-  replyPrefix: string
-  /** Characters per text; longer replies are split. */
-  maxChars: number
-  /** Parts sent at once; the rest waits for "more". */
-  maxParts: number
-  /** Send "Working on it" once a run passes this. 0 disables. */
-  ackAfterMs: number
-  /** Send a progress line this often during long runs. 0 disables. */
-  progressEveryMs: number
-  /** A thread idle longer than this starts a fresh agent session. */
-  sessionIdleMs: number
-  workdir: string
-  /** Which agent CLI answers a text, unless a thread says otherwise. */
-  engine: EngineId
-  claudeBin: string
-  claudeModel: string | null
-  /** How much Claude Code may do without asking. */
-  permissionMode: string
-  codexBin: string
-  codexModel: string | null
-  /** How much Codex may do without asking. The two CLIs spell this differently. */
-  codexPermission: CodexPermission
-  timeoutMs: number
+export type { UplinkConfig }
+
+/**
+ * Reads `config/uplink.ts`, applies the `UPLINK_*` environment over it, then
+ * resolves what a config file cannot state: paths written with `~`, and where
+ * the agent CLIs actually are on this Mac.
+ *
+ * The environment step is bunfig's own `applyEnvVarsToConfig`, the same
+ * mechanism the rest of the Stacks family uses, rather than a hand-rolled
+ * reader. It derives the variable name from the key, so `pollMs` is
+ * `UPLINK_POLL_MS`, and coerces to the type of the default: numbers with
+ * `Number`, booleans from "true", and a comma separated list into an array.
+ *
+ * Note it is NOT `loadConfig({ name: 'uplink', checkEnv: true })`, which looks
+ * like the obvious call and would break every variable documented in
+ * `.env.example`. bunfig applies the environment to `defaultConfig` and then
+ * merges the config file OVER the result, so a key present in `config/uplink.ts`
+ * would silently ignore its `UPLINK_*` variable. Uplink is configured through
+ * `.env`, so the file is the defaults and the environment wins.
+ */
+export function loadConfig(env: Env = process.env): UplinkConfig {
+  const applied = withEnv(env, () => applyEnvVarsToConfig('uplink', defaults) as UplinkConfig)
+
+  return {
+    ...applied,
+    // Normalized rather than trusted: a handle can be written "(555) 123-4567"
+    // in a config file as easily as in a variable.
+    allowed: parseHandleList(applied.allowed.join(',')),
+    messagesDb: expandHome(applied.messagesDb),
+    workdir: expandHome(applied.workdir),
+    engine: engineId(applied.engine),
+    claudeBin: expandHome(applied.claudeBin) || findClaude(),
+    // UPLINK_MODEL predates the second engine and meant Claude's model alias,
+    // so an existing .env keeps working.
+    claudeModel: applied.claudeModel || env.UPLINK_MODEL || null,
+    codexBin: expandHome(applied.codexBin) || findCodex(),
+    codexModel: applied.codexModel || null,
+    codexPermission: codexPermission(applied.codexPermission),
+  }
 }
 
 type Env = Record<string, string | undefined>
 
-function int(env: Env, name: string, fallback: number): number {
-  const raw = env[name]
-  const value = raw === undefined || raw === '' ? Number.NaN : Number(raw)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function str(env: Env, name: string, fallback: string): string {
-  const raw = env[name]
-  return raw === undefined || raw === '' ? fallback : raw
+/**
+ * `applyEnvVarsToConfig` reads `process.env` and takes no environment argument,
+ * so an injected one is installed for the duration of the call. The call is
+ * synchronous, so nothing else observes the swap.
+ *
+ * The downloadable app is the reason this exists: it has no `.env` and builds
+ * an environment from `settings.json` instead.
+ */
+function withEnv<T>(env: Env, read: () => T): T {
+  if (env === process.env)
+    return read()
+  const real = process.env
+  process.env = env as NodeJS.ProcessEnv
+  try {
+    return read()
+  }
+  finally {
+    process.env = real
+  }
 }
 
 function expandHome(path: string): string {
   return path === '~' ? homedir() : path.replace(/^~\//, `${homedir()}/`)
-}
-
-const MINUTE = 60_000
-
-/** From .env in the Stacks app; the downloadable app passes `settingsEnv(settings)`. */
-export function loadConfig(env: Env = process.env): UplinkConfig {
-  return {
-    allowed: parseHandleList(env.UPLINK_ALLOWED),
-    messagesDb: expandHome(str(env, 'UPLINK_MESSAGES_DB', DEFAULT_MESSAGES_DB)),
-    pollMs: int(env, 'UPLINK_POLL_MS', 2000),
-    catchUpMs: int(env, 'UPLINK_CATCH_UP_MS', 30 * MINUTE),
-    replyPrefix: str(env, 'UPLINK_REPLY_PREFIX', '🛰 '),
-    maxChars: int(env, 'UPLINK_MAX_CHARS', 1200),
-    maxParts: int(env, 'UPLINK_MAX_PARTS', 3),
-    ackAfterMs: int(env, 'UPLINK_ACK_AFTER_MS', 20_000),
-    progressEveryMs: int(env, 'UPLINK_PROGRESS_EVERY_MS', 10 * MINUTE),
-    sessionIdleMs: int(env, 'UPLINK_SESSION_IDLE_MS', 6 * 60 * MINUTE),
-    workdir: expandHome(str(env, 'UPLINK_WORKDIR', homedir())),
-    engine: engineId(env.UPLINK_ENGINE),
-    claudeBin: expandHome(str(env, 'UPLINK_CLAUDE_BIN', findClaude())),
-    // UPLINK_MODEL predates the second engine and meant Claude's model alias,
-    // so an existing .env keeps working.
-    claudeModel: env.UPLINK_CLAUDE_MODEL || env.UPLINK_MODEL || null,
-    permissionMode: str(env, 'UPLINK_PERMISSION_MODE', 'bypassPermissions'),
-    codexBin: expandHome(str(env, 'UPLINK_CODEX_BIN', findCodex())),
-    codexModel: env.UPLINK_CODEX_MODEL || null,
-    codexPermission: codexPermission(env.UPLINK_CODEX_PERMISSION),
-    timeoutMs: int(env, 'UPLINK_TIMEOUT_MS', 90 * MINUTE),
-  }
 }
 
 function engineId(value: string | undefined): EngineId {
@@ -93,8 +85,6 @@ function engineId(value: string | undefined): EngineId {
 function codexPermission(value: string | undefined): CodexPermission {
   return value && (CODEX_PERMISSIONS as readonly string[]).includes(value)
     ? value as CodexPermission
-    // Claude Code runs with bypassPermissions, because nobody is at the Mac to
-    // approve anything. Codex's equivalent is the same trade, spelled its way.
     : 'bypass'
 }
 
