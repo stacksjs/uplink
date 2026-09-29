@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
+import pkg from '../../package.json'
 
 /**
  * Installs Uplink as a login item that stays running: an `Uplink.app` bundle
@@ -43,6 +44,12 @@ function xml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+/**
+ * The bundle `buddy uplink:install` writes, from source. Its version comes from
+ * package.json for the same reason the launcher's does: a second copy is a
+ * copy that goes stale, and this one had, so an install from a 0.1.4 tree
+ * reported itself as 0.1.0 to macOS and to anyone reading Get Info.
+ */
 export function infoPlist(): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -53,7 +60,7 @@ export function infoPlist(): string {
   <key>CFBundleDisplayName</key><string>Uplink (source)</string>
   <key>CFBundleExecutable</key><string>Uplink</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>${xml(pkg.version)}</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSUIElement</key><true/>
   <key>LSBackgroundOnly</key><true/>

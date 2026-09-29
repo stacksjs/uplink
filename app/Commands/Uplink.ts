@@ -234,13 +234,27 @@ export default defineCommand((cli) => {
       const built = `${appDir}/storage/framework/desktop-dmg/Uplink-${version}.dmg`
       const stable = `${appDir}/storage/framework/desktop-dmg/Uplink.dmg`
       copyFileSync(built, stable)
-      // The homepage's download button states the version and size; commit this.
+      // What the homepage's download button reads.
       await Bun.write(`${appDir}/resources/data/release.json`, `${JSON.stringify({
         version,
         bytes: Bun.file(built).size,
         minimumMacOS: '13',
         url: 'https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg',
       }, null, 2)}\n`)
+
+      // Committed and pushed here rather than left as a note to whoever is
+      // releasing. `gh` cuts the tag from the remote tip, so this has to land
+      // first or the tagged commit does not contain its own release metadata,
+      // and the site keeps advertising the previous version until somebody
+      // remembers. Skipped when nothing changed, so re-running a release for
+      // the same version is not an error.
+      const pending = Bun.spawnSync(['git', 'status', '--porcelain', 'resources/data/release.json'], { cwd: appDir }).stdout.toString().trim()
+      if (pending) {
+        step(['git', 'add', 'resources/data/release.json'])
+        step(['git', 'commit', '-m', `chore: Uplink ${version} is out`])
+        step(['git', 'push'])
+      }
+
       step(['gh', 'release', 'create', `v${version}`, stable, built, '--title', `Uplink ${version}`, '--notes', `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.`, ...(options.draft ? ['--draft'] : [])])
       process.exit(0)
     })
