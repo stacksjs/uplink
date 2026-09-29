@@ -228,6 +228,56 @@ export default defineCommand((cli) => {
           process.exit(result.exitCode ?? 1)
       }
 
+      const git = (...args: string[]): string =>
+        Bun.spawnSync(['git', ...args], { cwd: appDir, stderr: 'pipe' }).stdout.toString().trim()
+
+      const refuse = (...lines: string[]): never => {
+        console.error(lines.join('\n'))
+        return process.exit(1)
+      }
+
+      // Everything below runs before a single byte is built. A release that
+      // turns out to be unverifiable after `gh release create` has to be
+      // deleted by hand, and the download links resolve against `latest` from
+      // the moment it exists.
+      //
+      // The build runs out of the working tree, so an uncommitted edit ends up
+      // in the shipped binary with nothing naming the source it came from.
+      const dirty = git('status', '--porcelain')
+      if (dirty) {
+        refuse(
+          'The working tree is not clean, and the build comes out of it.',
+          'Commit or stash these first, or the signed binary contains changes no tag names:',
+          dirty,
+        )
+      }
+
+      // `gh release create` cuts the tag from the remote's default branch when
+      // the tag does not exist, not from local HEAD. A stale or unpushed local
+      // tree therefore produces a binary whose source is not the tagged source.
+      step(['git', 'fetch', '--quiet', '--tags'])
+      const head = git('rev-parse', 'HEAD')
+      const upstream = git('rev-parse', '@{u}')
+      if (!upstream) {
+        refuse('This branch has no upstream, so there is nothing to publish from. Push it first.')
+      }
+      if (head !== upstream) {
+        refuse(
+          'Local HEAD and the tracked remote branch are not the same commit.',
+          `  local:  ${head}`,
+          `  remote: ${upstream}`,
+          'Push or pull first. The tag would otherwise name a commit that did not build this.',
+        )
+      }
+
+      const tag = `v${version}`
+      if (git('tag', '--list', tag) || git('ls-remote', '--tags', 'origin', tag)) {
+        refuse(
+          `${tag} already exists, so this would publish under a tag that names something else.`,
+          'Bump the version in package.json, or delete the tag and its release first.',
+        )
+      }
+
       step(['./buddy', 'build:desktop'], { CRAFT_BIN: `${appDir}/pantry/.bin/craft` })
       step(['./buddy', 'build:dmg'], {
         DESKTOP_APP_NAME: 'Uplink',
@@ -242,10 +292,26 @@ export default defineCommand((cli) => {
       const built = `${appDir}/storage/framework/desktop-dmg/Uplink-${version}.dmg`
       const stable = `${appDir}/storage/framework/desktop-dmg/Uplink.dmg`
       copyFileSync(built, stable)
+
+      // Against the copy that gets uploaded, not only the build output: the
+      // stable name is what releases/latest/download serves, and it is the
+      // file a user actually opens. Three claims are made about it on the
+      // homepage and in the README, and until now nothing checked any of them.
+      step(['codesign', '--verify', '--deep', '--strict', '--verbose=2', stable])
+      step(['spctl', '-a', '-t', 'open', '--context', 'context:primary-signature', stable])
+      step(['xcrun', 'stapler', 'validate', stable])
+
+      // Published so a download can be checked against something. The file is
+      // hashed after verification and before anything is written, so the digest
+      // belongs to the bytes that were verified.
+      const sha256 = new Bun.CryptoHasher('sha256').update(await Bun.file(stable).arrayBuffer()).digest('hex')
+      console.log(`Uplink.dmg  sha256  ${sha256}`)
+
       // What the homepage's download button reads.
       await Bun.write(`${appDir}/resources/data/release.json`, `${JSON.stringify({
         version,
         bytes: Bun.file(built).size,
+        sha256,
         minimumMacOS: '13',
         url: 'https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg',
       }, null, 2)}\n`)
@@ -276,9 +342,24 @@ export default defineCommand((cli) => {
       // a second release for the same tag with its own generated notes, so
       // which text a reader got came down to which of the two finished last.
       const notesPath = `${appDir}/storage/framework/desktop-dmg/notes.md`
-      await Bun.write(notesPath, `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.\n\n${generated}\n`)
+      await Bun.write(notesPath, [
+        `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.`,
+        '',
+        '```',
+        `shasum -a 256 Uplink.dmg`,
+        `${sha256}  Uplink.dmg`,
+        '```',
+        '',
+        generated,
+        '',
+      ].join('\n'))
 
-      step(['gh', 'release', 'create', `v${version}`, stable, built, '--title', `Uplink ${version}`, '--notes-file', notesPath, ...(options.draft ? ['--draft'] : [])])
+      // The commit that carries this release's own metadata, pinned as a full
+      // SHA. Without `--target`, `gh` cuts the tag from the remote's default
+      // branch instead, which is not necessarily what was built.
+      const tagged = git('rev-parse', 'HEAD')
+      console.log(`${tag} will name ${tagged}`)
+      step(['gh', 'release', 'create', tag, stable, built, '--target', tagged, '--title', `Uplink ${version}`, '--notes-file', notesPath, ...(options.draft ? ['--draft'] : [])])
       process.exit(0)
     })
 
