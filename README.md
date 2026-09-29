@@ -1,15 +1,18 @@
 # Uplink
 
-Text your Mac from anywhere, even over satellite with no data, and Claude answers.
+Text your Mac from anywhere, even over satellite with no data, and an agent answers.
 
 Newer iPhones can send iMessages over satellite when there is no cell or Wi-Fi signal, but nothing
-that needs the internet works. Uplink turns those texts into a way to reach Claude: it watches
-Messages on this Mac for texts from you, runs each one through Claude Code (on your Claude Max
-login, no API key), and texts the answer back.
+that needs the internet works. Uplink turns those texts into a way to reach a coding agent: it
+watches Messages on this Mac for texts from you, runs each one through Claude Code or Codex (on the
+plan you already have, no API key), and texts the answer back.
+
+Claude Code is the default. `UPLINK_ENGINE=codex` changes it for the whole installation, the
+menubar has a picker, and texting `codex` or `claude` switches one thread.
 
 - "Whats the NFL score rn?" gets a web search and a two-line answer.
-- "please improve ~/Code/stacks with feature xyz" runs a full Claude Code session inside
-  `~/Code/stacks`, with that repo's CLAUDE.md, hooks and settings, and texts you a summary.
+- "please improve ~/Code/stacks with feature xyz" runs a full agent session inside
+  `~/Code/stacks`, with that repo's agent instructions, hooks and settings, and texts you a summary.
 - Follow-ups continue the same conversation until you text `new`.
 
 ## How it works
@@ -19,7 +22,8 @@ iPhone --(iMessage, maybe via satellite)--> Messages on this Mac --> ~/Library/M
                                                                         |
                                                   Uplink.app polls it every 2s (Full Disk Access)
                                                                         |
-                                       claude -p ... --resume <thread session>  (in the named repo)
+                                    claude -p ...  or  codex exec resume ...   (in the named repo)
+                                    whichever this thread is set to
                                                                         |
 iPhone <------------------------- Messages (AppleScript) <------- the reply, as plain text
 ```
@@ -27,8 +31,8 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
 - **Who can command it:** only direct (never group) chats with an allowed handle. By default that is
   this Mac's own Messages handles, so you text yourself. `UPLINK_ALLOWED` sets it explicitly. A
   message is honored only if it passes `app/Uplink/filter.ts`; everything else is ignored.
-- **One task at a time per thread.** A second task queues. `status`, `stop`, `new`, `more`, `ping`
-  and `help` are answered immediately and never queue.
+- **One task at a time per thread.** A second task queues. `status`, `stop`, `new`, `more`, `ping`,
+  `help`, `claude` and `codex` are answered immediately and never queue.
 - **Built for a thin link:** plain text, short answers, long replies split into up to 3 texts with
   the rest behind `more`, a "Working on it" after 20s and a progress line every 10 minutes.
 - **Replies start with 🛰**, so they stand apart in a thread with yourself, and so Uplink never
@@ -40,10 +44,16 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
 
 **[Download Uplink for Mac](https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg)**
 (macOS 13 or later, signed and notarized). Drag it to Applications and open it: the menubar walks you
-through Full Disk Access, signing in to Claude with a token from `claude setup-token` (kept in your
-Keychain), and who may text it. Then text yourself `ping`.
+through Full Disk Access, signing in to the agent you picked, and who may text it. Then text
+yourself `ping`.
 
-You need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) and a Claude plan.
+You need one of the two CLIs and a plan for it:
+
+- [Claude Code](https://docs.claude.com/en/docs/claude-code), the default. The menubar takes a
+  long-lived token from `claude setup-token` and keeps it in your Keychain.
+- [Codex](https://developers.openai.com/codex/cli). Sign in once on the Mac with `codex login`, or
+  `codex login --device-auth` over SSH. Codex keeps its own credentials, so Uplink stores nothing
+  and needs no API key either.
 
 Uplink answers texts once it is activated: [$1.99 a month, $19.99 a year, or $29.99
 once](https://uplink.stacksjs.com/pricing), and a code gets six months of Monthly free. The
@@ -78,7 +88,8 @@ its Full Disk Access grant is separate from the downloaded app's):
 
 2. **Grant Full Disk Access to Uplink (source)** in System Settings > Privacy & Security.
 
-3. **Sign in to Claude** with a long-lived token for a background service:
+3. **Sign in to the agent you want.** For Claude Code, a long-lived token, because a background
+   service cannot answer a browser prompt:
 
    ```bash
    claude setup-token
@@ -86,6 +97,16 @@ its Full Disk Access grant is separate from the downloaded app's):
 
    ```bash
    ./buddy env:set CLAUDE_CODE_OAUTH_TOKEN "$(pbpaste | tr -d '[:space:]')"
+   ```
+
+   For Codex, sign in once and it keeps its own credentials:
+
+   ```bash
+   codex login   # or: codex login --device-auth, over SSH
+   ```
+
+   ```bash
+   ./buddy env:set UPLINK_ENGINE codex
    ```
 
 4. **Check it**, then text yourself `ping`:
@@ -119,18 +140,22 @@ Pushing to `main` deploys https://uplink.stacksjs.com once CI passes (`.github/w
 | `./buddy uplink:watch` | The watcher itself, in the foreground (needs Full Disk Access for your terminal) |
 | `./buddy dev` | The dashboard: setup status, what it is doing, recent texts |
 
-Configuration lives in `.env`; see the `UPLINK_*` block in `.env.example`. The service picks up edits by itself.
+Configuration lives in `.env`; see the `UPLINK_*` block in `.env.example`, which covers both
+engines (`UPLINK_ENGINE`, `UPLINK_CLAUDE_BIN`, `UPLINK_CODEX_BIN` and the rest). The service picks
+up edits by itself.
 
 ## Layout
 
 - `app/Uplink/`: the daemon (`uplink.ts`), the chat.db reader (`messages-db.ts`,
-  `typedstream.ts`), the command filter (`filter.ts`), the Claude Code engine (`engine.ts`),
-  replies (`sender.ts`, `format.ts`), the launchd service and app bundle (`service.ts`,
-  `launcher.ts`) and setup checks (`doctor.ts`).
+  `typedstream.ts`), the command filter (`filter.ts`), the words it answers itself (`commands.ts`,
+  including `claude` and `codex`), the two engines and the choice between them (`engine.ts`,
+  `codex-engine.ts`, `engines.ts`), replies (`sender.ts`, `format.ts`), the launchd service and app
+  bundle (`service.ts`, `launcher.ts`) and setup checks (`doctor.ts`).
 - `app/Commands/Uplink.ts`: the `buddy uplink:*` commands.
-- `app/Models/`: `Conversation` (a thread and its Claude session) and `Run` (one text, one run).
+- `app/Models/`: `Conversation` (a thread, its agent session and which agent) and `Run` (one text,
+  one run).
 - `resources/views/index.stx`: the dashboard.
-- `tests/unit/uplink/`: against a real chat.db-shaped SQLite file and a stub `claude`.
+- `tests/unit/uplink/`: against a real chat.db-shaped SQLite file and stub CLIs.
 
 ```bash
 ./pantry/.bin/bun test tests/unit/uplink
