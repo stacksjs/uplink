@@ -50,6 +50,11 @@ jobs:
       - name: Lint
         run: bun buddy lint
 
+      # The version lives in package.json; everything else derives it. Two
+      # copies had already drifted before anything compared them (#29).
+      - name: Check the app version is consistent
+        run: bun run release:check
+
   typecheck:
     runs-on: ${{ matrix.os }}
 

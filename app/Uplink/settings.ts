@@ -17,6 +17,14 @@ export const DATA_DIR = join(homedir(), 'Library', 'Application Support', 'Uplin
 export const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
 export const DATABASE_PATH = join(DATA_DIR, 'uplink.sqlite')
 export const LOG_PATH = join(homedir(), 'Library', 'Logs', 'Uplink.log')
+/**
+ * Rotate past this. The watcher polls every two seconds and appends whatever
+ * it finds, so the file is unbounded on a Mac that is simply left running.
+ * One rotation is kept as `Uplink.log.1`, because the lines leading up to a
+ * crash are the ones worth reading and a rotation triggered by that crash's
+ * own output would otherwise throw them away.
+ */
+export const LOG_MAX_BYTES = 5 * 1024 * 1024
 
 const KEYCHAIN_SERVICE = 'com.stacksjs.uplink'
 // Claude Code's token. Codex keeps its own credentials in CODEX_HOME via
