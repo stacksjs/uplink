@@ -38,6 +38,7 @@ export class ModelStore implements Store {
       cwd: row.cwd ?? null,
       lastActiveAt: row.last_active_at ?? null,
       moreText: row.more_text ?? null,
+      engine: row.engine ?? null,
     }
   }
 
@@ -49,6 +50,7 @@ export class ModelStore implements Store {
       cwd: conversation.cwd,
       lastActiveAt: conversation.lastActiveAt,
       moreText: conversation.moreText,
+      engine: conversation.engine,
     }
     const existing = await Conversation.where('chat_guid', conversation.chatGuid).first() as { update: (v: object) => Promise<unknown> } | undefined
     if (existing)

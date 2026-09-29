@@ -110,5 +110,17 @@ export default defineModel({
       validation: { rule: schema.number() },
       factory: () => Date.now(),
     },
+
+    /**
+     * Which agent answered. Nullable rather than defaulted: rows written
+     * before a thread could choose predate the question, and calling them all
+     * Claude would be a guess recorded as a fact.
+     */
+    engine: {
+      order: 14,
+      fillable: true,
+      validation: { rule: schema.enum(['claude', 'codex']) },
+      factory: faker => faker.helpers.arrayElement(['claude', 'codex']),
+    },
   },
 } as const)

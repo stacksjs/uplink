@@ -301,6 +301,7 @@ export class Uplink {
       cwd: null,
       lastActiveAt: null,
       moreText: null,
+      engine: null,
     }
   }
 

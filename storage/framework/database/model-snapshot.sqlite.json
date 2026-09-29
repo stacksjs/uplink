@@ -90,6 +90,18 @@
             "isUnique": false,
             "isNullable": true,
             "hasDefault": false
+          },
+          {
+            "name": "engine",
+            "type": "enum",
+            "isPrimaryKey": false,
+            "isUnique": false,
+            "isNullable": true,
+            "hasDefault": false,
+            "enumValues": [
+              "claude",
+              "codex"
+            ]
           }
         ],
         "indexes": [
@@ -257,6 +269,18 @@
             "isUnique": false,
             "isNullable": true,
             "hasDefault": false
+          },
+          {
+            "name": "engine",
+            "type": "enum",
+            "isPrimaryKey": false,
+            "isUnique": false,
+            "isNullable": true,
+            "hasDefault": false,
+            "enumValues": [
+              "claude",
+              "codex"
+            ]
           }
         ],
         "indexes": []
@@ -392,7 +416,7 @@
       }
     ]
   },
-  "hash": "cf904d0837380746ef9f95409635f2960b57dbac539b69229ea1da12f911d4b5",
+  "hash": "3273a7f2b7ad412f972eb4decd23ad15b2cb9ac86d757bd5f520ed81f2e3d919",
   "dialect": "sqlite",
-  "updatedAt": "2026-09-28T21:27:50.923Z"
+  "updatedAt": "2026-09-29T15:42:55.226Z"
 }
