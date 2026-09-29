@@ -20,6 +20,10 @@ const navDownloadUrl = release.url
         <a href="/pricing" class="hover:opacity-80 u-muted">Pricing</a>
       @endif
       <a href="/#questions" class="hidden md:inline hover:opacity-80 u-muted">Questions</a>
+      <a href="https://github.com/stacksjs/uplink" class="hidden sm:inline-flex gap-1.5 items-center hover:opacity-80 u-muted" rel="noopener">
+        <span class="size-4 i-hugeicons-github" aria-hidden="true"></span>
+        <span class="sr-only md:not-sr-only">GitHub</span>
+      </a>
       <a href="{{ navDownloadUrl }}" class="u-btn u-btn-primary" style="padding: .5rem 1rem"><span>Download<span class="hidden sm:inline"> for Mac</span></span></a>
     </div>
   </nav>
