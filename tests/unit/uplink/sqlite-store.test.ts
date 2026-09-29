@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { loadConfig } from '../../../app/Uplink/config'
 import { MessagesDb } from '../../../app/Uplink/messages-db'
 import { cleanToken, readSettings, settingsEnv, tokenLooksValid, writeSettings } from '../../../app/Uplink/settings'
-import { migrate, schemaVersion, SqliteStore, TABLES } from '../../../app/Uplink/sqlite-store'
+import { migrate, RUN_COLUMNS, schemaVersion, SqliteStore, TABLES } from '../../../app/Uplink/sqlite-store'
 import { Uplink } from '../../../app/Uplink/uplink'
 import { FakeChatDb, FakeEngine, FakeSender, ME, settle } from './fixtures'
 
@@ -90,6 +90,23 @@ function columnsOf(path: string, table: string): string[] {
   return names
 }
 
+/**
+ * Compared as a set, not a list. `ALTER TABLE ADD COLUMN` appends, so a column
+ * written into the middle of `TABLES` is last on an upgraded database and
+ * mid-list on a new one. Both are correct, and an order-sensitive assertion
+ * would fail the upgrade that worked.
+ */
+function sameColumns(path: string, table: { name: string, columns: Record<string, string> }): void {
+  expect([...columnsOf(path, table.name)].sort()).toEqual(Object.keys(table.columns).sort())
+}
+
+function versionOf(path: string): number {
+  const db = new Database(path)
+  const version = schemaVersion(db)
+  db.close()
+  return version
+}
+
 describe('SqliteStore migrations', () => {
   it('creates a database that is already current', () => {
     const path = join(tempDir(), 'uplink.sqlite')
@@ -100,9 +117,7 @@ describe('SqliteStore migrations', () => {
     for (const table of TABLES)
       expect(columnsOf(path, table.name)).toEqual(Object.keys(table.columns))
 
-    const db = new Database(path)
-    expect(schemaVersion(db)).toBeGreaterThan(0)
-    db.close()
+    expect(versionOf(path)).toBeGreaterThan(0)
   })
 
   /**
@@ -164,12 +179,63 @@ describe('SqliteStore migrations', () => {
     used.run('INSERT INTO runs (chat_guid, message_guid, prompt) VALUES (?, ?, ?)', ['g', 'm', 'p'])
     used.close()
 
+    expect(versionOf(path)).toBe(0)
+
     const store = new SqliteStore(path)
     expect(store.schemaError).toBeNull()
     store.close()
 
     for (const table of TABLES)
-      expect(columnsOf(path, table.name)).toEqual(Object.keys(table.columns))
+      sameColumns(path, table)
+    // Stamped on an upgraded database, not only on a new one. Without this a
+    // migration could leave the version at 0 and every other test stay green.
+    const fresh = join(tempDir(), 'fresh.sqlite')
+    new SqliteStore(fresh).close()
+    expect(versionOf(path)).toBe(versionOf(fresh))
+  })
+
+  /**
+   * The claim in this file's header is that a column is added in one place.
+   * TypeScript only half enforces it: `RUN_COLUMNS` is a `Record` over
+   * `RunRecord`, so those two cannot drift, but nothing ties either to
+   * `TABLES`. A column named in one and not the other is exactly #9 again, so
+   * it is pinned here instead of in the type system.
+   */
+  it('names the same runs columns in TABLES and in RUN_COLUMNS', () => {
+    const declared = Object.keys(TABLES.find(table => table.name === 'runs')!.columns)
+    // `id` is the key SQLite assigns; nothing writes it.
+    expect(Object.values(RUN_COLUMNS).sort()).toEqual(declared.filter(name => name !== 'id').sort())
+  })
+
+  /**
+   * During an update two Uplinks hold this file for a moment, and the loser of
+   * a write lock abandons it for an in-memory database and loses the history.
+   * A launch that changes nothing must therefore not ask for a write lock, and
+   * almost every launch changes nothing.
+   *
+   * Not covered here: the launch that does have work to do and meets a lock.
+   * That one waits on `PRAGMA busy_timeout`, and proving it needs a second
+   * process, because SQLite's wait blocks this one's event loop.
+   */
+  it('opens a current database while another process is writing to it', async () => {
+    const path = join(tempDir(), 'uplink.sqlite')
+    new SqliteStore(path).close()
+
+    const other = new Database(path)
+    other.exec('BEGIN IMMEDIATE')
+    other.run('INSERT INTO state (key, value) VALUES (?, ?)', ['cursor', '1'])
+
+    // Opening is the assertion: it neither threw nor fell back to memory.
+    const store = new SqliteStore(path)
+    expect(store.schemaError).toBeNull()
+
+    other.exec('ROLLBACK')
+    other.close()
+
+    // And it is the real file, not a replacement that forgets on quit.
+    expect(await store.createRun({ chatGuid: 'g', messageGuid: 'm', prompt: 'p', cwd: '/tmp', status: 'queued' })).toBeGreaterThan(0)
+    store.close()
+    expect(new SqliteStore(path).recentRuns()[0]).toMatchObject({ prompt: 'p' })
   })
 
   it('runs twice over the same database without changing it', () => {
