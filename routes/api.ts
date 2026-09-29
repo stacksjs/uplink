@@ -27,6 +27,10 @@ route.get('/hello', () => response.text('hello world'))
 // there is nothing for a CSRF token to protect, and the app has none to send.
 route.post('/license/check', 'Actions/License/CheckLicenseAction').skipCsrf()
 route.post('/billing/portal', 'Actions/Billing/OpenPortalAction').skipCsrf()
+// Stripe's own copy of a completed checkout. It carries a signature rather
+// than a session cookie, so it skips CSRF like the two above, and it is the
+// reason a buyer who never loads /thanks still gets a key.
+route.post('/billing/webhook', 'Actions/Billing/StripeWebhookAction').skipCsrf()
 
 // `/coming-soon` is served as an STX view from
 // `storage/framework/defaults/resources/views/coming-soon.stx`. The
