@@ -42,6 +42,7 @@ const words = [
   { word: 'new', does: 'start a fresh conversation' },
   { word: 'more', does: 'the rest of a long reply' },
   { word: 'ping', does: 'check it is alive' },
+  { word: 'claude / codex', does: 'switch that thread to that agent' },
 ]
 
 import release from '../data/release.json'
