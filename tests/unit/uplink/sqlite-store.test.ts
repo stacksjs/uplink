@@ -171,6 +171,11 @@ describe('SqliteStore migrations', () => {
    * someone adds a column that could not travel.
    */
   it('can add every column to a shipped database that is already in use', () => {
+    // A table added after 0.1.3 would be created rather than altered, and this
+    // test would quietly stop covering it. Add it to SHIPPED, or state here
+    // why it does not need the guard.
+    expect(TABLES.map(table => table.name).sort()).toEqual(Object.keys(SHIPPED).sort())
+
     const path = join(tempDir(), 'uplink.sqlite')
     write(path, SHIPPED)
     const used = new Database(path)

@@ -46,6 +46,10 @@ export interface TableSpec {
    * databases that already exist, so it has to be one SQLite can ALTER in:
    * nullable or carrying a constant default, and never PRIMARY KEY or UNIQUE.
    *
+   * Only missing columns are added. Changing a definition here, a default or a
+   * type, reaches new databases and no existing one, which is the original bug
+   * in a quieter form. A change like that needs its own step, not an edit.
+   *
    * Worth knowing before trusting a green test: SQLite only enforces the
    * NOT NULL and constant-default halves once a table has rows. An empty one
    * accepts both. So a new column can pass on a fresh database and fail on
