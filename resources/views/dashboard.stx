@@ -47,6 +47,9 @@ const statusStyles = {
     <meta http-equiv="refresh" content="15">
     <meta name="robots" content="noindex, nofollow">
     <title>Uplink - {{ data.headline }}</title>
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <meta name="description" content="Text this Mac from anywhere, even over satellite, and it answers with Claude.">
   </head>
   <body class="min-h-screen antialiased text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-950">

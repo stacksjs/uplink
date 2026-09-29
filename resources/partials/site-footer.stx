@@ -1,8 +1,10 @@
 <footer class="border-t u-line">
   <div class="flex flex-col gap-3 sm:flex-row sm:justify-between mx-auto px-4 py-10 sm:px-6 max-w-6xl text-sm u-muted">
     <p>Uplink is built with <a href="https://stacksjs.com" class="underline underline-offset-4 hover:opacity-80">Stacks</a>. The source is <a href="https://github.com/stacksjs/uplink" class="underline underline-offset-4 hover:opacity-80">on GitHub</a>.</p>
-    <p class="flex gap-5">
+    <p class="flex flex-wrap gap-x-5 gap-y-2">
       <a href="/pricing" class="hover:opacity-80">Pricing</a>
+      <a href="/privacy" class="hover:opacity-80">Privacy</a>
+      <a href="/terms" class="hover:opacity-80">Terms</a>
       <span>Earth photos: NASA, ISS Expedition 40.</span>
     </p>
   </div>

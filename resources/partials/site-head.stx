@@ -1,19 +1,76 @@
+<script server>
+// Everything a page says about itself to a browser, a search engine and a
+// link preview. The page supplies `path`, `title`, `description` and, when it
+// should stay out of search, `noindex`; the rest is derived here so no page
+// can forget a tag.
+//
+// The preview cards are generated from config/images.ts by
+// `buddy generate:images`: one per page that has its own, else the site card.
+// The prices in the structured data come from the same plans the pricing
+// page renders, so a search result can never quote an old price.
+import { PLANS } from '../../app/Billing/plans'
+
+const origin = 'https://uplink.stacksjs.com'
+const cards: Record<string, { file: string, alt: string }> = {
+  '/': { file: 'og.png', alt: 'Uplink: text your Mac. Claude answers, even over satellite.' },
+  '/pricing': { file: 'pricing.png', alt: 'Uplink pricing: $1.99 a month, $19.99 a year, or $29.99 once.' },
+}
+const card = cards[path] ?? cards['/']!
+const pageUrl = `${origin}${path}`
+const hidden = typeof noindex !== 'undefined' && noindex
+
+const software = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  'name': 'Uplink',
+  'url': origin,
+  'description': 'Text your Mac from anywhere, even over satellite, and Claude Code answers by text.',
+  'applicationCategory': 'DeveloperApplication',
+  'operatingSystem': 'macOS 13 or later',
+  'image': `${origin}/social/og.png`,
+  // Stored in cents; schema.org wants the decimal amount.
+  'offers': PLANS.map(plan => ({
+    '@type': 'Offer',
+    'name': plan.name,
+    'price': (plan.priceCents / 100).toFixed(2),
+    'priceCurrency': 'USD',
+    'url': `${origin}/pricing`,
+  })),
+  'publisher': { '@type': 'Organization', 'name': 'Stacks.js', 'url': 'https://stacksjs.com' },
+}
+
+const seo = {
+  title,
+  description,
+  canonical: pageUrl,
+  robots: hidden ? 'noindex' : 'index, follow',
+  openGraph: {
+    type: 'website',
+    url: pageUrl,
+    siteName: 'Uplink',
+    locale: 'en_US',
+    image: `${origin}/social/${card.file}`,
+    imageAlt: card.alt,
+    imageWidth: 1200,
+    imageHeight: 630,
+    imageType: 'image/png',
+  },
+  twitter: { card: 'summary_large_image' },
+  structuredData: hidden ? undefined : software,
+}
+</script>
+
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ title }}</title>
-<meta name="description" content="{{ description }}">
-<link rel="canonical" href="https://uplink.stacksjs.com{{ path }}">
-@if(typeof noindex !== 'undefined' && noindex)
-  <meta name="robots" content="noindex">
-@endif
-<meta property="og:type" content="website">
-<meta property="og:url" content="https://uplink.stacksjs.com{{ path }}">
-<meta property="og:title" content="{{ title }}">
-<meta property="og:description" content="{{ description }}">
-<meta property="og:image" content="https://uplink.stacksjs.com/images/california-night-1920.jpg">
-<meta property="og:image:alt" content="The California coast at night, photographed from the International Space Station">
-<meta name="twitter:card" content="summary_large_image">
+@seo({ ...seo })
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c0c0e" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap">

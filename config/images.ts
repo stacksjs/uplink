@@ -1,73 +1,80 @@
 import type { ImagesConfig } from '@stacksjs/types'
 
 /**
- * **Images Configuration**
+ * Generated imagery for Uplink, built by `buddy generate:images`.
  *
- * Generated imagery — the social cards link previews show, the App Store
- * screenshot set, and the platform icon sets — is declared here and built by
- * `buddy generate:images`. Because Stacks is fully-typed, you may hover any of
- * the options below and the definitions will be provided. In case you have any
- * questions, feel free to reach out via Discord or GitHub Discussions.
+ * One source for the brand: the app icon the Mac bundle ships
+ * (resources/assets/images/app-icon.png, which the DMG build reads too).
+ * The favicons, the web manifest and the link-preview cards are all derived
+ * from it, so a new icon is one file and one command.
  *
- * Every generator is off until you fill it in: each one needs an asset the
- * framework cannot invent — a TrueType face, a product capture, a square
- * source icon.
+ * The cards use the site's palette: near-black with the sodium-amber accent
+ * of the city lights in the hero photo, set in Geist like the pages.
  */
 export default {
-  // Cards and screenshots draw real glyphs rather than relying on a system
-  // font stack, so a face has to be a file the project ships or depends on.
-  // Point at a `.ttf`; OpenType/CFF and WOFF2 are different outline formats
-  // and will not load.
-  //
-  // fonts: {
-  //   title: '@expo-google-fonts/inter/Inter_700Bold.ttf',
-  //   body: '@expo-google-fonts/inter/Inter_400Regular.ttf',
-  // },
+  brand: 'Uplink',
+  mark: 'resources/assets/images/app-icon.png',
+  // The icon is already a plate: drawing another one behind it boxes it twice.
+  markPlate: false,
 
-  // Shared palette. Positions are fractions of the canvas, so one definition
-  // renders correctly at every size the generators produce.
-  //
-  // background: {
-  //   color: '#0b0b0f',
-  //   gradient: { angle: 165, stops: [
-  //     { offset: 0, color: '#0b0b0f' },
-  //     { offset: 1, color: '#14141c' },
-  //   ] },
-  //   glows: [{ x: 0.84, y: 0.08, radius: 0.6, color: '#6366f138' }],
-  // },
-  // color: '#f5f5f7',
-  // accent: '#6366f1',
+  fonts: {
+    title: 'resources/assets/fonts/geist/Geist-Bold.ttf',
+    body: 'resources/assets/fonts/geist/Geist-Regular.ttf',
+  },
+
+  background: {
+    color: '#0c0c0e',
+    gradient: { angle: 160, stops: [
+      { offset: 0, color: '#141417' },
+      { offset: 1, color: '#0c0c0e' },
+    ] },
+    glows: [{ x: 0.86, y: 0.1, radius: 0.62, color: '#f59e0b2e' }],
+  },
+  color: '#f4f4f5',
+  mutedColor: '#a1a1aa',
+  accent: '#f59e0b',
 
   social: {
-    enabled: false,
+    enabled: true,
     outputDir: 'public/social',
     publicPath: '/social',
-    // The `og` preset is the primary card and keeps the bare filename. The
-    // others exist because some consumers reserve a taller slot than 1.91:1
-    // and letterbox a wide card into it.
-    presets: ['og', 'square', 'portrait'],
-    // pages: [
-    //   { path: '/', title: 'Your headline here.', subtitle: 'One supporting line.' },
-    // ],
+    // The one 1200x630 card every consumer reads. Square and portrait crops
+    // only earn their place when something links them directly.
+    presets: ['og'],
+    format: 'png',
+    pages: [
+      {
+        path: '/',
+        eyebrow: 'For Mac',
+        title: 'Text your Mac. Claude answers, even over satellite.',
+        subtitle: 'An iMessage with no signal becomes a Claude Code run on your Mac, and the reply comes back as a text.',
+      },
+      {
+        path: '/pricing',
+        eyebrow: 'Pricing',
+        title: '$1.99 a month, $19.99 a year, or $29.99 once.',
+        subtitle: 'Every plan is the whole app, running on your own Claude or ChatGPT plan.',
+      },
+    ],
   },
 
   appStore: {
     enabled: false,
-    outputDir: 'resources/app-store/screenshots',
-    displays: ['APP_IPHONE_67', 'APP_IPAD_PRO_3GEN_129', 'APP_DESKTOP'],
-    // Each slide is one claim about the product. `capture` is a raw screenshot
-    // of the app — no frame, no caption; the framing happens for you.
-    // slides: [
-    //   { capture: 'dist/captures/home.png', headline: 'What it does.', subheadline: 'Why that matters.' },
-    // ],
   },
 
   appIcons: {
-    enabled: false,
-    // source: 'resources/icon.png',
+    enabled: true,
+    source: 'resources/assets/images/app-icon.png',
     outputDir: 'resources/app-icons',
-    platforms: ['ios', 'macos'],
-    favicon: false,
+    // A web set only: the Mac bundle's icon comes from the source file itself.
+    platforms: [],
+    favicon: true,
     faviconDir: 'public',
+    manifest: {
+      name: 'Uplink',
+      shortName: 'Uplink',
+      themeColor: '#0c0c0e',
+      backgroundColor: '#0c0c0e',
+    },
   },
 } satisfies ImagesConfig

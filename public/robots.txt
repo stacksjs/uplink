@@ -1,0 +1,9 @@
+# /checkout/* opens a Stripe Checkout session on every request, and /thanks
+# and /api/* only mean something to a buyer or the Mac app.
+User-agent: *
+Allow: /
+Disallow: /checkout/
+Disallow: /thanks
+Disallow: /api/
+
+Sitemap: https://uplink.stacksjs.com/sitemap.xml

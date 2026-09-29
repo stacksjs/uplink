@@ -95,6 +95,8 @@ const faqs = [
           @endforeach
         </div>
 
+        <p class="mt-5 text-center text-sm u-muted">Buying means you agree to the <a href="/terms" class="underline underline-offset-4 hover:opacity-80">terms</a>. Not for you? Write within 14 days for a full refund.</p>
+
         <form action="/checkout/monthly" method="get" class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mt-6 px-7 py-5 rounded-2xl u-wash u-reveal">
           <div>
             <h2 class="font-semibold">Have a code?</h2>

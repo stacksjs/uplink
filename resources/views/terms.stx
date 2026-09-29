@@ -1,0 +1,95 @@
+<script server>
+/**
+ * /terms - the rules for buying and using Uplink.
+ *
+ * Plan names and prices come from app/Billing/plans.ts, the same source the
+ * pricing page and Stripe are set up from, so the terms can never quote a
+ * different price. Cancelling matches the pricing page: through the Stripe
+ * billing page Uplink's menubar opens, keeping the paid period.
+ */
+import { formatCents, PLANS, SIX_MONTHS_FREE } from '../../app/Billing/plans'
+
+const path = '/terms'
+const title = 'Terms - Uplink'
+const description = 'The terms for buying and using Uplink: the plans, cancelling, refunds, and what Uplink is and is not responsible for.'
+const updated = 'September 29, 2026'
+
+const planLine = PLANS
+  .map(plan => `${plan.name} is ${formatCents(plan.priceCents)} ${plan.cadence}`)
+  .join(', ')
+
+const sections = [
+  {
+    heading: 'Buying Uplink',
+    paragraphs: [
+      `${planLine}. Every plan is the whole app with every update while it lasts. Prices are in US dollars.`,
+      'A license is for you. Use it on your own Macs; do not share or resell the key.',
+    ],
+  },
+  {
+    heading: 'Renewing and cancelling',
+    paragraphs: [
+      'Monthly and Yearly renew automatically at the price you signed up for until you cancel. Cancel any time with Manage Subscription in Uplink\'s menubar, which opens Stripe\'s billing page. You keep Uplink until the end of the period you paid for, and you are not charged again.',
+      `A code for ${SIX_MONTHS_FREE.months} free months of Monthly asks for no card. To keep going after them, add a card with Manage Subscription before they end. Without one the plan lapses once Stripe has tried to charge it, and Uplink stops answering texts.`,
+      'Lifetime is paid once and never renews.',
+    ],
+  },
+  {
+    heading: 'Refunds',
+    paragraphs: [
+      'If Uplink does not work for you, write to uplink@stacksjs.com within 14 days of paying and we will refund you in full. Refunding ends the license.',
+    ],
+  },
+  {
+    heading: 'What Uplink does, and what it does not',
+    paragraphs: [
+      'Uplink passes the texts you allow to Claude Code or Codex on your Mac and texts back the answer. Those tools act with your permissions, inside the repositories you name, and can change files and run commands there. Choose carefully who may text your Mac, and review what they change, as you would for any assistant with your access.',
+      'The answers come from Anthropic or OpenAI under your own plan and their terms, and they can be wrong. Uplink needs your Mac awake, online and signed in to Messages, and it depends on iMessage, satellite messaging and those AI services, none of which we control.',
+    ],
+  },
+  {
+    heading: 'Liability',
+    paragraphs: [
+      'Uplink is provided as is. As far as the law allows, we are not liable for indirect or consequential losses, or for what the AI tools do on your Mac at your request, and our total liability is limited to what you paid for Uplink in the twelve months before the claim.',
+    ],
+  },
+  {
+    heading: 'Changes',
+    paragraphs: [
+      'If we change these terms, the new ones apply from the date above. A change to what a renewing plan costs applies only from your next renewal, and we will email you before it does.',
+    ],
+  },
+]
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    @include('site-head')
+  </head>
+  <body class="antialiased uplink">
+    @include('site-nav')
+
+    <main class="mx-auto px-4 pb-24 pt-14 sm:px-6 lg:pt-20 max-w-3xl">
+      <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">Terms</p>
+      <h1 class="mt-4 font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl">The terms, in plain words.</h1>
+      <p class="mt-4 text-sm u-muted">Last updated {{ updated }}</p>
+
+      <div class="mt-12 border-t u-line">
+        @foreach(sections as section)
+          <section class="py-8 border-b u-line">
+            <h2 class="font-semibold text-xl tracking-tight">{{ section.heading }}</h2>
+            @foreach(section.paragraphs as paragraph)
+              <p class="mt-3 max-w-[65ch] leading-relaxed u-muted">{{ paragraph }}</p>
+            @endforeach
+          </section>
+        @endforeach
+      </div>
+
+      <p class="mt-10 leading-relaxed u-muted">Questions go to <a href="mailto:uplink@stacksjs.com" class="underline underline-offset-4 hover:opacity-80">uplink@stacksjs.com</a>. What we do with your data is in the <a href="/privacy" class="underline underline-offset-4 hover:opacity-80">privacy policy</a>.</p>
+    </main>
+
+    @include('site-footer')
+  </body>
+</html>

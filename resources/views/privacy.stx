@@ -1,0 +1,93 @@
+<script server>
+/**
+ * /privacy - what Uplink and this site do with your data.
+ *
+ * Written from what the code does, not from a template: the Mac app's only
+ * request to us is the license check (app/Uplink/license.ts sends the key and
+ * nothing else), the site loads no analytics, and the one cookie is the CSRF
+ * token checkout sets. Change this page when any of that changes.
+ */
+const path = '/privacy'
+const title = 'Privacy - Uplink'
+const description = 'What Uplink and uplink.stacksjs.com do with your data: your texts stay between your Mac, Apple and the AI plan you use. We hold your license, nothing else.'
+const updated = 'September 29, 2026'
+
+const sections = [
+  {
+    heading: 'The short version',
+    paragraphs: [
+      'Uplink runs on your Mac. Your texts, the replies and your code never reach us. What we hold is your license: the email you bought with, which plan, and Stripe\'s ids for your payment.',
+    ],
+  },
+  {
+    heading: 'What stays on your Mac',
+    paragraphs: [
+      'Uplink reads the Messages database on your Mac to find texts from the handles you allow, which is why it asks for Full Disk Access. It keeps its own record of each run (what was asked, the reply, how long it took) in a database on your Mac. You can see it in Uplink\'s dashboard.',
+      'Your Claude Code token is stored in your Mac\'s Keychain, and so is your license key.',
+    ],
+  },
+  {
+    heading: 'Who else sees your texts',
+    paragraphs: [
+      'Apple carries the messages, as with any iMessage. To answer a text, Uplink runs Claude Code or Codex on your Mac, which sends the text and the files it reads to Anthropic or OpenAI under your own account and their privacy terms. Uplink adds no service of its own in between.',
+    ],
+  },
+  {
+    heading: 'What the app sends us',
+    paragraphs: [
+      'When it starts, every six hours, and when you activate it, Uplink sends your license key to uplink.stacksjs.com and gets back whether it is valid and when it renews. When you choose Manage Subscription it sends the key again to get a link to Stripe\'s billing page. It sends nothing else: no texts, no replies, no device identifiers.',
+    ],
+  },
+  {
+    heading: 'When you buy',
+    paragraphs: [
+      'You pay on Stripe\'s own checkout page, so your card never reaches us. Stripe tells us your email, the plan, and its ids for your customer record and subscription. We keep those with your license key so we can email you the key, answer the license check and open your billing page. Stripe handles your payment under its own privacy policy.',
+      'We email you once, with your key, from uplink@stacksjs.com. We do not send newsletters or share your email with anyone.',
+    ],
+  },
+  {
+    heading: 'This website',
+    paragraphs: [
+      'The site loads no analytics and no tracking scripts. Checkout sets one cookie, a security token that stops other sites submitting forms as you. The server keeps ordinary request logs.',
+    ],
+  },
+  {
+    heading: 'Your choices',
+    paragraphs: [
+      'Write to uplink@stacksjs.com to see what we hold about you or to have it deleted. Deleting your license record ends the license, so cancel your plan first if it renews. Stripe keeps its own payment records for as long as the law requires it to.',
+    ],
+  },
+]
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    @include('site-head')
+  </head>
+  <body class="antialiased uplink">
+    @include('site-nav')
+
+    <main class="mx-auto px-4 pb-24 pt-14 sm:px-6 lg:pt-20 max-w-3xl">
+      <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">Privacy</p>
+      <h1 class="mt-4 font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl">Your texts stay yours.</h1>
+      <p class="mt-4 text-sm u-muted">Last updated {{ updated }}</p>
+
+      <div class="mt-12 border-t u-line">
+        @foreach(sections as section)
+          <section class="py-8 border-b u-line">
+            <h2 class="font-semibold text-xl tracking-tight">{{ section.heading }}</h2>
+            @foreach(section.paragraphs as paragraph)
+              <p class="mt-3 max-w-[65ch] leading-relaxed u-muted">{{ paragraph }}</p>
+            @endforeach
+          </section>
+        @endforeach
+      </div>
+
+      <p class="mt-10 leading-relaxed u-muted">Questions go to <a href="mailto:uplink@stacksjs.com" class="underline underline-offset-4 hover:opacity-80">uplink@stacksjs.com</a>. The rules for using Uplink are in the <a href="/terms" class="underline underline-offset-4 hover:opacity-80">terms</a>.</p>
+    </main>
+
+    @include('site-footer')
+  </body>
+</html>
