@@ -1,4 +1,4 @@
-import type { Engine, EngineEvent, EngineProbe, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
+import type { Engine, EngineEvent, EngineId, EngineInstall, EngineProbe, EngineRequest, EngineResult, EngineRun } from '../../../app/Uplink/engine'
 import type { AutomationState, ReplyTarget, Sender } from '../../../app/Uplink/sender'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync } from 'node:fs'
@@ -153,12 +153,25 @@ export class FakeEngine implements Engine {
   runs: PendingRun[] = []
   probes = 0
 
-  // Identity matching the real Claude engine, so a test that asserts on a
-  // reply naming the CLI is asserting the text a user would actually get.
-  readonly id = 'claude' as const
-  readonly label = 'Claude Code'
-  readonly authFailureHint = 'run "claude setup-token" on the Mac and give Uplink the token'
-  readonly install = { command: 'bun install -g @anthropic-ai/claude-code', url: 'https://docs.claude.com/en/docs/claude-code' }
+  // Identity matching the real engines, so a test that asserts on a reply
+  // naming the CLI is asserting the text a user would actually get. Defaults
+  // to Claude, which is what a test with one engine wants.
+  readonly id: EngineId
+  readonly label: string
+  readonly authFailureHint: string
+  readonly install: EngineInstall
+
+  constructor(id: EngineId = 'claude') {
+    this.id = id
+    const claude = id === 'claude'
+    this.label = claude ? 'Claude Code' : 'Codex'
+    this.authFailureHint = claude
+      ? 'run "claude setup-token" on the Mac and give Uplink the token'
+      : 'run "codex login" on the Mac (or "codex login --device-auth" over SSH)'
+    this.install = claude
+      ? { command: 'bun install -g @anthropic-ai/claude-code', url: 'https://docs.claude.com/en/docs/claude-code' }
+      : { command: 'bun install -g @openai/codex', url: 'https://developers.openai.com/codex/cli' }
+  }
 
   probeResult: EngineProbe = { ok: true, reason: 'ok', detail: 'Signed in' }
 

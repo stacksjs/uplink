@@ -1,6 +1,6 @@
 import type { ControlCommand } from './commands'
 import type { UplinkConfig } from './config'
-import type { Engine, EngineRun } from './engine'
+import type { Engine, EngineId, EngineRun } from './engine'
 import type { IncomingMessage } from './messages-db'
 import type { ReplyTarget, Sender } from './sender'
 import type { ConversationRecord, Store } from './store'
@@ -36,7 +36,13 @@ export interface UplinkDeps {
   config: UplinkConfig
   messages: MessagesSource
   sender: Sender
+  /** The installation's engine: what a thread uses until it says otherwise. */
   engine: Engine
+  /**
+   * How to reach the other engine when a thread texts its name. Left out, every
+   * thread gets `engine`, which is what a test with one fake wants.
+   */
+  engineFor?: (id: EngineId) => Engine
   store: Store
   systemPrompt?: string
   log?: Logger
@@ -48,6 +54,12 @@ interface Job {
   prompt: string
   cwd: string
   target: ReplyTarget
+  /**
+   * Fixed when the text arrived, not read when the run starts: a task queued
+   * behind another runs on the engine it was sent to, even if the thread
+   * switched while it waited.
+   */
+  engine: EngineId
 }
 
 interface ActiveJob extends Job {
@@ -309,16 +321,18 @@ export class Uplink {
     const conversation = await this.conversation(target)
     const cwd = detectWorkdir(prompt, this.threadIsFresh(conversation) && conversation.cwd ? conversation.cwd : this.config.workdir)
 
+    const engine = conversation.engine ?? this.config.engine
     const runId = await this.deps.store.createRun({
       chatGuid: target.chatGuid,
       messageGuid: message.guid,
       prompt,
       cwd,
       status: 'queued',
+      engine,
     })
 
     const state = this.chat(target.chatGuid)
-    const job: Job = { runId, prompt, cwd, target }
+    const job: Job = { runId, prompt, cwd, target, engine }
     if (state.active) {
       state.queue.push(job)
       await this.reply(target, `Queued behind the current task (${state.queue.length} waiting). Text "status" or "stop".`)
@@ -328,19 +342,27 @@ export class Uplink {
     await this.begin(state, job)
   }
 
+  /** The engine behind an id, falling back to the installation's one. */
+  private engineOf(id: EngineId): Engine {
+    return this.deps.engineFor?.(id) ?? this.deps.engine
+  }
+
   private threadIsFresh(conversation: ConversationRecord): boolean {
     return conversation.lastActiveAt !== null && this.now() - conversation.lastActiveAt < this.config.sessionIdleMs
   }
 
   private async begin(state: ChatState, job: Job): Promise<void> {
     const conversation = await this.conversation(job.target)
-    const resume = conversation.sessionId && conversation.cwd === job.cwd && this.threadIsFresh(conversation)
+    // The engine has to agree as well: a session id belongs to the agent that
+    // made it, and handing a Claude one to Codex resumes nothing.
+    const sameEngine = (conversation.engine ?? this.config.engine) === job.engine
+    const resume = conversation.sessionId && conversation.cwd === job.cwd && sameEngine && this.threadIsFresh(conversation)
       ? conversation.sessionId
       : null
 
     await this.deps.store.updateRun(job.runId, { status: 'running', startedAt: this.now() })
 
-    const run = this.deps.engine.run({
+    const run = this.engineOf(job.engine).run({
       prompt: job.prompt,
       cwd: job.cwd,
       sessionId: resume,
@@ -407,7 +429,7 @@ export class Uplink {
       // Naming the wrong CLI, or a .env the downloadable app does not have,
       // sends someone at the Mac to fix something that is not broken. The
       // engine carries its own remedy.
-      const engine = this.deps.engine
+      const engine = this.engineOf(active.engine)
       const text = result.authFailure
         ? `I cannot reach ${engine.label}: it is not signed in on this Mac. Someone there needs to ${engine.authFailureHint}.`
         : result.ok ? result.text : `That failed: ${result.text}`
@@ -446,13 +468,19 @@ export class Uplink {
         return
 
       case 'status': {
+        // A thread that can switch has to be able to say what it is on.
+        const conversation = await this.conversation(target)
+        const thread = this.engineOf(conversation.engine ?? this.config.engine).label
         if (!state.active) {
-          await this.reply(target, 'Idle. Text me a question or a task.')
+          await this.reply(target, `Idle on ${thread}. Text me a question or a task.`)
           return
         }
         const active = state.active
         const lines = [
           `Working ${formatDuration(this.now() - active.startedAt)} on: ${truncate(active.prompt, 80)}`,
+          // The running task's engine, which is not always the thread's: it
+          // keeps whatever it was sent to.
+          `Agent: ${this.engineOf(active.engine).label}`,
           active.lastActivity ? `Latest: ${active.lastActivity}` : 'Thinking.',
         ]
         if (state.queue.length > 0)
@@ -469,6 +497,35 @@ export class Uplink {
         const conversation = await this.conversation(target)
         await this.deps.store.saveConversation({ ...conversation, sessionId: null, cwd: null, moreText: null })
         await this.reply(target, 'Fresh start. Your next text begins a new conversation.')
+        return
+      }
+
+      case 'claude':
+      case 'codex': {
+        const conversation = await this.conversation(target)
+        const engine = this.engineOf(command)
+        if ((conversation.engine ?? this.config.engine) === command) {
+          await this.reply(target, `Already on ${engine.label}.`)
+          return
+        }
+
+        // Asked now rather than when the next text fails. Someone switching
+        // from a phone cannot see that the CLI is missing, and finding out on
+        // their real task costs them the task.
+        const probe = await engine.probe()
+        if (!probe.ok) {
+          await this.reply(target, probe.reason === 'missing'
+            ? `${engine.label} is not installed on this Mac. Install it there with: ${engine.install.command}`
+            : `${engine.label} is not ready: ${probe.detail}`)
+          return
+        }
+
+        // The session id goes with it. It belongs to the agent that made it,
+        // and the other one cannot resume it, so this starts a fresh
+        // conversation the way "new" does. The working directory stays: it is
+        // not the agent's, it is the thread's.
+        await this.deps.store.saveConversation({ ...conversation, engine: command, sessionId: null })
+        await this.reply(target, `Switched to ${engine.label}. Starting a fresh conversation, because a session cannot move between agents.`)
         return
       }
 
