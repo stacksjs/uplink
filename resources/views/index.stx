@@ -14,7 +14,7 @@
  */
 const path = '/'
 const title = 'Uplink - text your Mac, get Claude, even over satellite'
-const description = 'Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac.'
+const description = 'Uplink turns an iMessage, even one sent over satellite with no data, into an agent run on your Mac.'
 
 const exchanges = [
   {
@@ -32,7 +32,7 @@ const exchanges = [
 const steps = [
   { icon: 'i-hugeicons-message-01', verb: 'Text', body: 'Message yourself from your iPhone. iMessage over satellite needs no cell or Wi-Fi signal.' },
   { icon: 'i-hugeicons-inbox', verb: 'Read', body: 'Uplink watches the Messages database on your Mac and picks up texts from handles you allow.' },
-  { icon: 'i-hugeicons-terminal', verb: 'Run', body: 'Claude Code runs headless on your Claude plan, inside the repository your text names.' },
+  { icon: 'i-hugeicons-terminal', verb: 'Run', body: 'Claude Code or Codex runs headless on the plan you already have, inside the repository your text names.' },
   { icon: 'i-hugeicons-sent', verb: 'Reply', body: 'The answer comes back as plain text, split into at most three messages.' },
 ]
 
@@ -53,7 +53,7 @@ const downloadMeta = `Version ${release.version}, macOS ${release.minimumMacOS} 
 
 const install = [
   { verb: 'Install', body: 'Open the download and drag Uplink to Applications. It is signed and notarized by Apple, so it opens like any other app.' },
-  { verb: 'Say yes three times', body: 'Uplink sets itself up. It opens the one switch in System Settings it needs, signs in to Claude in your browser, and asks once to use Messages. It finds your numbers by itself.' },
+  { verb: 'Say yes three times', body: 'Uplink sets itself up. It opens the one switch in System Settings it needs, signs in to the agent you chose, and asks once to use Messages. It finds your numbers by itself.' },
   { verb: 'Text it', body: 'Send yourself "ping" from your iPhone. The answer starts with a satellite.' },
 ]
 
@@ -72,15 +72,15 @@ const faqs = [
   },
   {
     q: 'Do I need an API key?',
-    a: 'No. Uplink runs Claude Code on your Claude plan, such as Max. It signs in through your browser and keeps the token in your Keychain.',
+    a: 'No. Uplink runs the CLI you already pay for: Claude Code on a Claude plan, which signs in through your browser and keeps its token in your Keychain, or Codex on a ChatGPT plan, which keeps its own credentials and leaves Uplink holding nothing.',
   },
   {
     q: 'What can it do on my Mac?',
-    a: 'Anything Claude Code can: search the web, read and edit files, run your tests. That is why only one-to-one chats with handles you allow can reach it.',
+    a: 'Anything the agent can: search the web, read and edit files, run your tests. That is why only one-to-one chats with handles you allow can reach it.',
   },
   {
     q: 'What does it cost?',
-    a: '$1.99 a month, $19.99 a year, or $29.99 once. That is for Uplink itself; the answers run on your own Claude plan, and nothing is charged per text.',
+    a: '$1.99 a month, $19.99 a year, or $29.99 once. That is for Uplink itself; the answers run on the plan you already have, Claude or ChatGPT, and nothing is charged per text.',
   },
   {
     q: 'Can it answer with ChatGPT instead?',
@@ -110,7 +110,7 @@ const faqs = [
             Off the grid, still one text from Claude.
           </h1>
           <p class="mt-6 max-w-[34rem] leading-relaxed text-lg u-muted u-rise" style="--i: 1">
-            Uplink turns an iMessage, even one sent over satellite with no data, into a Claude Code run on your Mac, and texts the answer back.
+            Uplink turns an iMessage, even one sent over satellite with no data, into an agent run on your Mac, and texts the answer back.
           </p>
           <div class="flex flex-wrap gap-3 mt-8 u-rise" style="--i: 2">
             <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
@@ -160,7 +160,7 @@ const faqs = [
         <div class="grid gap-12 lg:gap-20 lg:grid-cols-[0.9fr_1.1fr] mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
           <div class="lg:sticky lg:top-28 lg:self-start">
             <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">How it works</p>
-            <h2 id="how-title" class="mt-3 font-semibold text-3xl tracking-tight md:text-4xl">From a text to a Claude Code session, and back.</h2>
+            <h2 id="how-title" class="mt-3 font-semibold text-3xl tracking-tight md:text-4xl">From a text to an agent session, and back.</h2>
             <p class="mt-4 max-w-[46ch] u-muted">No server in between. Your Mac reads the message, does the work and answers through Messages.</p>
           </div>
           <ol class="grid gap-10">
@@ -204,7 +204,7 @@ const faqs = [
             <article class="p-6 border rounded-2xl u-line u-raised u-reveal">
               <span class="size-6 i-hugeicons-folder-code u-accent" aria-hidden="true"></span>
               <h3 class="mt-4 font-semibold text-xl">Works inside your repos</h3>
-              <p class="mt-2 leading-relaxed u-muted">Name a path and the run starts there, with that repository's CLAUDE.md, hooks and settings. Follow-ups continue the session.</p>
+              <p class="mt-2 leading-relaxed u-muted">Name a path and the run starts there, with that repository's agent instructions, hooks and settings, CLAUDE.md or AGENTS.md. Follow-ups continue the session.</p>
             </article>
 
             <article class="p-6 rounded-2xl u-reveal u-wash">
