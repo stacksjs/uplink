@@ -14,6 +14,13 @@ export default {
   stripe: {
     publishableKey: env.STRIPE_PUBLISHABLE_KEY || '',
     secretKey: env.STRIPE_SECRET_KEY || '',
+    /**
+     * The signing secret of the account webhook endpoint,
+     * `/api/billing/webhook`, which is what issues a license for a checkout
+     * whose buyer never reached the thank-you page. Stripe shows it as
+     * `whsec_...` when the endpoint is created.
+     */
+    webhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
   },
 
   /**

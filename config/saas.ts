@@ -1,4 +1,5 @@
 import type { SaasConfig } from '@stacksjs/types'
+import process from 'node:process'
 import { PLANS, PRODUCT_NAME, SIX_MONTHS_FREE } from '../app/Billing/plans'
 
 /**
@@ -27,9 +28,12 @@ export default {
       },
     },
   ],
+  // Where Stripe sends what happened. `STRIPE_WEBHOOK_SECRET` is the signing
+  // secret Stripe shows when the endpoint is created; without it the endpoint
+  // verifies nothing and refuses every delivery, which is the safe direction.
   webhook: {
-    endpoint: 'your-webhook-endpoint',
-    secret: 'your-webhook-secret',
+    endpoint: '/api/billing/webhook',
+    secret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
   },
   currencies: ['usd'],
   // Six months of Monthly, free: 100% off six monthly invoices. The code is
