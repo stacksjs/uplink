@@ -50,7 +50,11 @@ export async function stripeForLicenses(): Promise<LicenseStripe> {
 }
 
 export async function licenses(): Promise<Licenses> {
-  return new Licenses(modelLicenseStore, await stripeForLicenses())
+  return new Licenses(modelLicenseStore, await stripeForLicenses(), undefined, async (license, { freeMonths }) => {
+    const { sendLicenseEmail } = await import('../Mail/LicenseEmail')
+    const { siteOrigin } = await import('./checkout')
+    await sendLicenseEmail(license, `${siteOrigin()}/thanks?session_id=${license.stripeCheckoutSessionId}`, freeMonths)
+  })
 }
 
 export interface Thanks {

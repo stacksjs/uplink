@@ -131,3 +131,20 @@ describe('Licenses', () => {
     expect(await licenses.customerFor(generateLicenseKey())).toBeNull()
   })
 })
+
+describe('the license email', () => {
+  it('is sent once, for a license issued just now, and says when the free months end', async () => {
+    const sent: Array<{ key: string, freeMonths: boolean }> = []
+    const state = account()
+    state.sessions.cs_test_free = { ...state.sessions.cs_test_free, amount_total: 0, total_details: { amount_discount: 199 } }
+    const licenses = new Licenses(memoryStore(), fakeStripe(state), undefined, async (license, context) => { sent.push({ key: license.key, ...context }) })
+    const license = await licenses.issue('cs_test_free')
+    await licenses.issue('cs_test_free')
+    expect(sent).toEqual([{ key: license!.key, freeMonths: true }])
+  })
+
+  it('never takes the purchase down with it', async () => {
+    const licenses = new Licenses(memoryStore(), fakeStripe(account()), undefined, async () => { throw new Error('SMTP is down') })
+    expect(await licenses.issue('cs_test_monthly')).toMatchObject({ plan: 'monthly' })
+  })
+})

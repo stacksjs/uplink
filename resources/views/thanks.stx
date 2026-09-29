@@ -40,7 +40,7 @@ const downloadUrl = release.url
       @if(paid)
         <h1 class="mt-6 font-semibold text-4xl tracking-tight u-rise" style="--i: 1">You have Uplink {{ planName }}.</h1>
         @if(email)
-          <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Stripe is sending the receipt to {{ email }}.</p>
+          <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Your key is on its way to {{ email }}, and Stripe is sending the receipt.</p>
         @endif
 
         <section class="mt-10 p-6 border rounded-2xl u-line u-raised u-rise" style="--i: 3" aria-labelledby="license-title">

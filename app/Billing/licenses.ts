@@ -108,8 +108,16 @@ export function standing(license: LicenseRecord, cancelAtPeriodEnd = false): Lic
   }
 }
 
+/** Told about each license the first time it is issued (the license email). */
+export type OnIssued = (license: LicenseRecord, context: { freeMonths: boolean }) => Promise<void>
+
 export class Licenses {
-  constructor(private readonly store: LicenseStore, private readonly stripe: LicenseStripe, private readonly now: () => number = () => Math.floor(Date.now() / 1000)) {}
+  constructor(
+    private readonly store: LicenseStore,
+    private readonly stripe: LicenseStripe,
+    private readonly now: () => number = () => Math.floor(Date.now() / 1000),
+    private readonly onIssued?: OnIssued,
+  ) {}
 
   /**
    * The license for a finished checkout, created on first sight. Null when
@@ -148,6 +156,19 @@ export class Licenses {
       checkedAt: this.now(),
     }
     await this.store.create(license)
+
+    // Only for a license made just now: a reload of the thank-you page finds
+    // the existing row above and sends nothing. A failed send is reported and
+    // never takes the purchase down with it - the key is on the page anyway.
+    if (this.onIssued) {
+      const freeMonths = (session.total_details?.amount_discount ?? 0) > 0 && session.amount_total === 0
+      try {
+        await this.onIssued(license, { freeMonths })
+      }
+      catch (error) {
+        console.error(`[licenses] ${license.key.slice(-4)}: could not send the license email: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     return license
   }
 
