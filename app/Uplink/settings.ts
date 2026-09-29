@@ -47,20 +47,57 @@ export const DEFAULT_SETTINGS: Settings = {
   paused: false,
 }
 
+/**
+ * One test per field, `undefined` meaning "not a value this build can use".
+ *
+ * Both directions go through these: reading a file written by a hand, an older
+ * build or a half-finished save, and taking a field from the popover. Writing
+ * the checks twice is how the two drift, and it is the read path that cannot
+ * afford to be wrong: it runs before the menubar exists.
+ */
+const FIELDS: { [K in keyof Settings]: (value: unknown) => Settings[K] | undefined } = {
+  allowed: value => Array.isArray(value) ? value.map(String).map(handle => handle.trim()).filter(Boolean) : undefined,
+  engine: value => typeof value === 'string' && isEngineId(value) ? value : undefined,
+  model: value => value === null || (typeof value === 'string' && value !== '') ? (value as string | null) : undefined,
+  workdir: value => typeof value === 'string' && value !== '' ? value : undefined,
+  openAtLogin: value => typeof value === 'boolean' ? value : undefined,
+  paused: value => typeof value === 'boolean' ? value : undefined,
+}
+
+/**
+ * Every field of `input` this build can use, and `base` for every field it
+ * cannot. Never throws, whatever `input` is.
+ *
+ * `base` is what distinguishes the two callers: the defaults when reading a
+ * file, which must always produce usable settings, and the current settings
+ * when taking a partial update from the popover.
+ */
+export function coerceSettings(input: unknown, base: Settings = DEFAULT_SETTINGS): Settings {
+  const fields = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const settings = { ...base }
+  for (const key of Object.keys(FIELDS) as Array<keyof Settings>) {
+    const value = FIELDS[key](fields[key])
+    if (value !== undefined)
+      Object.assign(settings, { [key]: value })
+  }
+  return settings
+}
+
+/**
+ * Always usable settings, because this is read at the desktop agent's first
+ * statements: a throw here is a launchd restart loop, and the menubar that
+ * would have explained it never starts. Only `engine` used to be checked, so
+ * an `allowed` that was not an array reached `settingsEnv` and took the app
+ * down on every launch, invisibly.
+ */
 export function readSettings(path: string = SETTINGS_PATH): Settings {
   if (!existsSync(path))
     return { ...DEFAULT_SETTINGS }
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Settings>
-    const settings = { ...DEFAULT_SETTINGS, ...parsed }
-    // A hand-edited or downgraded file can name an engine this build does not
-    // have. Falling back beats refusing to start.
-    if (!isEngineId(String(settings.engine)))
-      settings.engine = DEFAULT_SETTINGS.engine
-    return settings
+    return coerceSettings(JSON.parse(readFileSync(path, 'utf8')))
   }
   catch {
-    // A hand-edited file with a typo must not stop the app from starting.
+    // Not JSON at all.
     return { ...DEFAULT_SETTINGS }
   }
 }
