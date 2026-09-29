@@ -3,7 +3,7 @@
  * message matches ("stop", "/stop", "Stop."), so "stop the dev server in
  * ~/Code/x" still reaches the agent as a task.
  */
-export type ControlCommand = 'help' | 'status' | 'stop' | 'new' | 'more' | 'ping'
+export type ControlCommand = 'help' | 'status' | 'stop' | 'new' | 'more' | 'ping' | 'claude' | 'codex'
 
 const ALIASES: Record<string, ControlCommand> = {
   'help': 'help',
@@ -19,6 +19,10 @@ const ALIASES: Record<string, ControlCommand> = {
   'more': 'more',
   'continue reply': 'more',
   'ping': 'ping',
+  // Switching engines is a whole-message word like the rest, so "codex keeps
+  // timing out on ~/Code/x" is still a task and not a switch.
+  'claude': 'claude',
+  'codex': 'codex',
 }
 
 export function parseControl(text: string): ControlCommand | null {
@@ -33,4 +37,5 @@ export const HELP_TEXT = [
   'new - start a fresh conversation',
   'more - rest of a long reply',
   'ping - check I am alive',
+  'claude / codex - switch this thread to that agent',
 ].join('\n')

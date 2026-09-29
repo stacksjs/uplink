@@ -37,7 +37,7 @@ export interface RunRow extends RunRecord {
  * old it is, and so the day a change needs more than a new column - a backfill,
  * a rename - has a version to key off.
  */
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 export interface TableSpec {
   name: string
@@ -78,6 +78,7 @@ export const TABLES: TableSpec[] = [
       cwd: 'TEXT',
       last_active_at: 'INTEGER',
       more_text: 'TEXT',
+      engine: 'TEXT',
     },
   },
   {
@@ -97,6 +98,7 @@ export const TABLES: TableSpec[] = [
       last_activity: 'TEXT',
       started_at: 'INTEGER',
       finished_at: 'INTEGER',
+      engine: 'TEXT',
     },
   },
 ]
@@ -115,6 +117,7 @@ export const RUN_COLUMNS: Record<keyof RunRecord, string> = {
   lastActivity: 'last_activity',
   startedAt: 'started_at',
   finishedAt: 'finished_at',
+  engine: 'engine',
 }
 
 /**
@@ -236,17 +239,19 @@ export class SqliteStore implements Store {
       cwd: row.cwd,
       lastActiveAt: row.last_active_at,
       moreText: row.more_text,
+      engine: row.engine,
     }
   }
 
   async saveConversation(c: ConversationRecord): Promise<void> {
     this.db.query(`
-      INSERT INTO conversations (chat_guid, handle, service, session_id, cwd, last_active_at, more_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO conversations (chat_guid, handle, service, session_id, cwd, last_active_at, more_text, engine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chat_guid) DO UPDATE SET
         handle = excluded.handle, service = excluded.service, session_id = excluded.session_id,
-        cwd = excluded.cwd, last_active_at = excluded.last_active_at, more_text = excluded.more_text
-    `).run(c.chatGuid, c.handle, c.service, c.sessionId, c.cwd, c.lastActiveAt, c.moreText)
+        cwd = excluded.cwd, last_active_at = excluded.last_active_at, more_text = excluded.more_text,
+        engine = excluded.engine
+    `).run(c.chatGuid, c.handle, c.service, c.sessionId, c.cwd, c.lastActiveAt, c.moreText, c.engine)
   }
 
   async createRun(run: RunRecord): Promise<number> {
@@ -283,6 +288,7 @@ export class SqliteStore implements Store {
       lastActivity: row.last_activity,
       startedAt: row.started_at,
       finishedAt: row.finished_at,
+      engine: row.engine,
     }))
   }
 }

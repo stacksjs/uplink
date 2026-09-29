@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { loadConfig } from './config'
-import { allEngines, selectedEngine } from './engines'
+import { allEngines, engineFor, selectedEngine } from './engines'
 import { formatDuration, truncate } from './format'
 import { MessagesAccessError, MessagesDb } from './messages-db'
 import { AppleScriptSender } from './sender'
@@ -300,7 +300,9 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     // license.
     if (!isLicensed(license))
       return
-    uplink = new Uplink({ config, messages, sender, engine: selectedEngine(config), store })
+    // `engineFor` as well as `engine`, so a thread that texts "codex" can
+    // reach the other one without restarting the agent.
+    uplink = new Uplink({ config, messages, sender, engine: selectedEngine(config), engineFor: id => engineFor(id, config), store })
     await uplink.start()
   }
 

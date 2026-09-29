@@ -70,5 +70,17 @@ export default defineModel({
       validation: { rule: schema.string() },
       factory: () => '',
     },
+
+    /**
+     * The engine this thread was switched to, or null to follow whatever the
+     * installation is set to. Null is the point: a thread that never asked
+     * keeps tracking the menubar's picker, so changing it there still works.
+     */
+    engine: {
+      order: 8,
+      fillable: true,
+      validation: { rule: schema.enum(['claude', 'codex']) },
+      factory: () => 'claude',
+    },
   },
 } as const)

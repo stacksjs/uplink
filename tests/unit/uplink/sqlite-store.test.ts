@@ -30,7 +30,7 @@ describe('SqliteStore', () => {
     await store.setCursor(42)
     expect(await store.cursor()).toBe(42)
 
-    const conversation = { chatGuid: 'g', handle: ME, service: 'iMessage', sessionId: 's', cwd: '/tmp', lastActiveAt: 5, moreText: 'x'.repeat(3000) }
+    const conversation = { chatGuid: 'g', handle: ME, service: 'iMessage', sessionId: 's', cwd: '/tmp', lastActiveAt: 5, moreText: 'x'.repeat(3000), engine: null }
     await store.saveConversation(conversation)
     await store.saveConversation({ ...conversation, sessionId: 's2' })
     expect(await store.conversation('g')).toEqual({ ...conversation, sessionId: 's2' })

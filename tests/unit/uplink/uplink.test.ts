@@ -20,9 +20,13 @@ function config(overrides: Partial<UplinkConfig> = {}): UplinkConfig {
     progressEveryMs: 0,
     sessionIdleMs: 6 * 3_600_000,
     workdir: '/tmp',
+    engine: 'claude',
     claudeBin: 'claude',
-    model: null,
+    claudeModel: null,
     permissionMode: 'bypassPermissions',
+    codexBin: 'codex',
+    codexModel: null,
+    codexPermission: 'bypass',
     timeoutMs: 60_000,
     ...overrides,
   }
@@ -32,6 +36,8 @@ interface Harness {
   fake: FakeChatDb
   sender: FakeSender
   engine: FakeEngine
+  /** The other agent, reachable once a thread texts its name. */
+  codex: FakeEngine
   store: MemoryStore
   uplink: Uplink
 }
@@ -44,10 +50,19 @@ async function harness(overrides: Partial<UplinkConfig> = {}, seed?: (fake: Fake
   seed?.(fake)
   const sender = new FakeSender(fake)
   const engine = new FakeEngine()
+  const codex = new FakeEngine('codex')
   const store = new MemoryStore()
-  const uplink = new Uplink({ config: config(overrides), messages: new MessagesDb(fake.path), sender, engine, store, log: silent })
+  const uplink = new Uplink({
+    config: config(overrides),
+    messages: new MessagesDb(fake.path),
+    sender,
+    engine,
+    engineFor: id => (id === 'codex' ? codex : engine),
+    store,
+    log: silent,
+  })
   await uplink.start({ poll: false }) // Each test drives tick() itself.
-  return { fake, sender, engine, store, uplink }
+  return { fake, sender, engine, codex, store, uplink }
 }
 
 afterEach(() => open?.close())
@@ -242,6 +257,128 @@ describe('Uplink', () => {
     expect(h.sender.texts()[0]).toContain('Claude Code')
     expect(h.sender.texts()[0]).toContain('claude setup-token')
     expect(h.store.runs.get(1)?.status).toBe('failed')
+  })
+
+  /**
+   * #10: a global setting cannot answer "use Codex for this one thread" from a
+   * phone, which is the point of the product.
+   */
+  it('switches one thread to the other agent, and does not carry the session across', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'hello', fromMe: true })
+    await h.uplink.tick()
+    h.engine.finish(0, 'hi', { sessionId: 'claude-session-1' })
+    await settle()
+
+    h.fake.add({ chat: ME, text: 'codex', fromMe: true })
+    await h.uplink.tick()
+    expect(h.sender.texts().at(-1)).toContain('Switched to Codex')
+
+    h.fake.add({ chat: ME, text: 'now do the thing', fromMe: true })
+    await h.uplink.tick()
+
+    // The task went to the other agent, and Claude was not asked again.
+    expect(h.codex.runs).toHaveLength(1)
+    expect(h.engine.runs).toHaveLength(1)
+    // A Claude session id cannot be resumed by Codex, so it is not offered.
+    expect(h.codex.runs[0].request.sessionId).toBeNull()
+    expect(h.store.runs.get(2)?.engine).toBe('codex')
+  })
+
+  it('keeps the thread on the new agent, and switches back when asked', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'codex', fromMe: true })
+    await h.uplink.tick()
+    h.fake.add({ chat: ME, text: 'one', fromMe: true })
+    await h.uplink.tick()
+    h.codex.finish(0, 'done')
+    await settle()
+
+    // Still Codex without being told again.
+    h.fake.add({ chat: ME, text: 'two', fromMe: true })
+    await h.uplink.tick()
+    expect(h.codex.runs).toHaveLength(2)
+    h.codex.finish(1, 'done')
+    await settle()
+
+    h.fake.add({ chat: ME, text: 'claude', fromMe: true })
+    await h.uplink.tick()
+    expect(h.sender.texts().at(-1)).toContain('Switched to Claude Code')
+    h.fake.add({ chat: ME, text: 'three', fromMe: true })
+    await h.uplink.tick()
+    expect(h.engine.runs).toHaveLength(1)
+  })
+
+  it('says so rather than switching twice', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'claude', fromMe: true })
+    await h.uplink.tick()
+    expect(h.sender.texts().at(-1)).toContain('Already on Claude Code')
+  })
+
+  /**
+   * A task queued behind another runs on the agent it was sent to. Reading the
+   * thread's engine at start time instead would silently move a waiting task
+   * onto an agent its author never chose.
+   */
+  it('runs a queued task on the agent it was sent to', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'first', fromMe: true })
+    await h.uplink.tick()
+    h.fake.add({ chat: ME, text: 'second', fromMe: true })
+    await h.uplink.tick() // queued behind the first
+
+    h.fake.add({ chat: ME, text: 'codex', fromMe: true })
+    await h.uplink.tick()
+
+    h.engine.finish(0, 'first done')
+    await settle()
+
+    // The queued one still went to Claude, and its row says so.
+    expect(h.engine.runs).toHaveLength(2)
+    expect(h.codex.runs).toHaveLength(0)
+    expect(h.store.runs.get(2)?.engine).toBe('claude')
+  })
+
+  it('will not switch to an agent that is not installed', async () => {
+    const h = await harness()
+    h.codex.probeResult = { ok: false, reason: 'missing', detail: 'Not found' }
+    h.fake.add({ chat: ME, text: 'codex', fromMe: true })
+    await h.uplink.tick()
+
+    expect(h.sender.texts().at(-1)).toContain('not installed')
+    // Told how, because nobody switching from a phone can see the Mac.
+    expect(h.sender.texts().at(-1)).toContain('bun install -g @openai/codex')
+
+    // And the thread did not move.
+    h.fake.add({ chat: ME, text: 'a task', fromMe: true })
+    await h.uplink.tick()
+    expect(h.engine.runs).toHaveLength(1)
+  })
+
+  it('says which agent an idle thread is on', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'status', fromMe: true })
+    await h.uplink.tick()
+    expect(h.sender.texts().at(-1)).toContain('Idle on Claude Code')
+  })
+
+  it('names the agent the running task is on', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'codex', fromMe: true })
+    await h.uplink.tick()
+    h.fake.add({ chat: ME, text: 'a task', fromMe: true })
+    await h.uplink.tick()
+    h.fake.add({ chat: ME, text: 'status', fromMe: true })
+    await h.uplink.tick()
+    expect(h.sender.texts().at(-1)).toContain('Agent: Codex')
+  })
+
+  it('offers both words in help', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'help', fromMe: true })
+    await h.uplink.tick()
+    expect(h.sender.texts().at(-1)).toContain('claude / codex')
   })
 
   /**

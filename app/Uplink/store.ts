@@ -4,6 +4,8 @@
  * the model-backed store in `model-store.ts`, tests use `MemoryStore`.
  */
 
+import type { EngineId } from './engine'
+
 export type RunStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped'
 
 export interface ConversationRecord {
@@ -15,6 +17,12 @@ export interface ConversationRecord {
   lastActiveAt: number | null
   /** The unsent tail of the last long reply, released by "more". */
   moreText: string | null
+  /**
+   * The engine this thread was switched to, or null to follow the
+   * installation's setting. Null rather than a default so a thread that never
+   * asked still tracks the menubar's picker.
+   */
+  engine: EngineId | null
 }
 
 export interface RunRecord {
@@ -31,6 +39,8 @@ export interface RunRecord {
   lastActivity?: string | null
   startedAt?: number | null
   finishedAt?: number | null
+  /** Which agent answered, recorded per run because a thread can switch. */
+  engine?: EngineId | null
 }
 
 export interface Store {

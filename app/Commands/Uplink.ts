@@ -79,6 +79,7 @@ export default defineCommand((cli) => {
         messages,
         sender,
         engine: selectedEngine(config),
+        engineFor: id => engineFor(id, config),
         store: new ModelStore(`${appDir}/storage/uplink/cursor`),
       })
       await uplink.start()
