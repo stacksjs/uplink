@@ -41,6 +41,13 @@ async function openMessages(config: ReturnType<typeof loadConfig>, appDir: strin
  * key, and the tables runs are recorded in. Both steps are idempotent, so
  * install can always run them.
  */
+const CHANGELOG_HEADING = '# Uplink Changelog'
+
+/** A changelog file without its heading, so two of them can be stacked. */
+function changelogBody(markdown: string): string {
+  return markdown.replace(CHANGELOG_HEADING, '').trim()
+}
+
 function prepareApp(appDir: string): void {
   const buddy = `${appDir}/buddy`
   if (!existsSync(`${appDir}/.env`)) {
@@ -243,20 +250,35 @@ export default defineCommand((cli) => {
         url: 'https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg',
       }, null, 2)}\n`)
 
+      // `buddy changelog` rewrites the file with the commits since the last
+      // tag and nothing else, so the older entries are carried over by hand.
+      // A changelog that forgets every release but the newest is not one.
+      const changelogPath = `${appDir}/CHANGELOG.md`
+      const kept = changelogBody(await Bun.file(changelogPath).text())
+      step(['./buddy', 'changelog', '--no-interaction'])
+      const generated = changelogBody(await Bun.file(changelogPath).text())
+      const sections = [`## v${version}\n`, `${generated}\n`, kept && `${kept}\n`].filter(Boolean)
+      await Bun.write(changelogPath, `${CHANGELOG_HEADING}\n\n${sections.join('\n')}`)
+
       // Committed and pushed here rather than left as a note to whoever is
       // releasing. `gh` cuts the tag from the remote tip, so this has to land
-      // first or the tagged commit does not contain its own release metadata,
-      // and the site keeps advertising the previous version until somebody
-      // remembers. Skipped when nothing changed, so re-running a release for
-      // the same version is not an error.
-      const pending = Bun.spawnSync(['git', 'status', '--porcelain', 'resources/data/release.json'], { cwd: appDir }).stdout.toString().trim()
+      // first or the tagged commit does not contain its own release notes or
+      // the version the site advertises. Skipped when nothing changed, so
+      // re-running a release for the same version is not an error.
+      const pending = Bun.spawnSync(['git', 'status', '--porcelain', 'resources/data/release.json', 'CHANGELOG.md'], { cwd: appDir }).stdout.toString().trim()
       if (pending) {
-        step(['git', 'add', 'resources/data/release.json'])
+        step(['git', 'add', 'resources/data/release.json', 'CHANGELOG.md'])
         step(['git', 'commit', '-m', `chore: Uplink ${version} is out`])
         step(['git', 'push'])
       }
 
-      step(['gh', 'release', 'create', `v${version}`, stable, built, '--title', `Uplink ${version}`, '--notes', `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.`, ...(options.draft ? ['--draft'] : [])])
+      // The only thing that writes a release body. The workflow used to create
+      // a second release for the same tag with its own generated notes, so
+      // which text a reader got came down to which of the two finished last.
+      const notesPath = `${appDir}/storage/framework/desktop-dmg/notes.md`
+      await Bun.write(notesPath, `Uplink ${version} for macOS 13 or later. Signed with a Developer ID and notarized by Apple.\n\n${generated}\n`)
+
+      step(['gh', 'release', 'create', `v${version}`, stable, built, '--title', `Uplink ${version}`, '--notes-file', notesPath, ...(options.draft ? ['--draft'] : [])])
       process.exit(0)
     })
 

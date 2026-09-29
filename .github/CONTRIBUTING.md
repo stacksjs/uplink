@@ -121,7 +121,8 @@ buddy lint # runs linter
 buddy lint:fix # runs linter and fixes issues
 
 buddy commit # follow CLI prompts for committing staged changes
-buddy release # creates the releases for the stack & triggers the Release Action (workflow)
+buddy uplink:release # the only thing that publishes Uplink: builds, signs, notarizes and attaches the DMG (macOS only)
+buddy release # bumps the version and tags; it does NOT publish, and a tag with no DMG fails the Release workflow
 buddy changelog # generates CHANGELOG.md
 
 # building for production (e.g. npm, Vercel, Netlify, et al.)
