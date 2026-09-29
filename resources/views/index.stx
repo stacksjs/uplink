@@ -49,7 +49,23 @@ import release from '../data/release.json'
 import { formatCents, PLANS, yearlySavingPercent } from '../../app/Billing/plans'
 
 const downloadUrl = release.url
-const downloadMeta = `Version ${release.version}, macOS ${release.minimumMacOS} or later, ${Math.round(release.bytes / 1_000_000)} MB`
+const downloadMeta = `Version ${release.version}, ${Math.round(release.bytes / 1_000_000)} MB`
+
+// Everything it takes to run Uplink, in the order someone would hit it. These
+// were spread over a caption, a hero line, two collapsed FAQ answers and an
+// install step below the button, so the one thing a visitor needs before
+// paying took five places to assemble.
+//
+// Apple Silicon is not a preference: `lipo -archs` on the shipped 0.1.4 DMG
+// reports `arm64` alone, so an Intel Mac cannot open it at all.
+const requirements = [
+  { need: 'An Apple Silicon Mac', detail: 'M1 or later. The app is arm64 only.' },
+  { need: `macOS ${release.minimumMacOS} or later`, detail: 'Signed and notarized, so it opens like any other app.' },
+  { need: 'Claude Code or Codex', detail: 'On the plan you already have, Claude or ChatGPT. No API key.' },
+  { need: 'Full Disk Access', detail: 'Only for Uplink, so it can read Messages. Not for your terminal.' },
+  { need: 'Permission to control Messages', detail: 'Asked once, so it can text the answer back.' },
+  { need: 'A Mac that stays awake', detail: 'A laptop with its lid closed sleeps unless it is on power with a display attached.' },
+]
 
 const install = [
   { verb: 'Install', body: 'Open the download and drag Uplink to Applications. It is signed and notarized by Apple, so it opens like any other app.' },
@@ -63,30 +79,39 @@ const yearlySaving = yearlySavingPercent()
 
 const faqs = [
   {
+    // Linked from the download section, which states the qualification in one
+    // sentence and sends anyone who wants the rest here.
+    id: 'satellite',
     q: 'Does texting yourself work over satellite?',
     a: 'It depends on how your iPhone routes a message to your own number, so try it once before you rely on it. If it does not arrive, sign the Mac into a second Apple ID and text that instead.',
   },
   {
+    id: 'full-disk-access',
     q: 'Why does it need Full Disk Access?',
     a: 'Messages keeps your texts in a database macOS protects. Uplink reads it to notice texts from the handles you allow, and ignores every other conversation.',
   },
   {
+    id: 'api-key',
     q: 'Do I need an API key?',
     a: 'No. Uplink runs the CLI you already pay for: Claude Code on a Claude plan, which signs in through your browser and keeps its token in your Keychain, or Codex on a ChatGPT plan, which keeps its own credentials and leaves Uplink holding nothing.',
   },
   {
+    id: 'what-it-can-do',
     q: 'What can it do on my Mac?',
     a: 'Anything the agent can: search the web, read and edit files, run your tests. That is why only one-to-one chats with handles you allow can reach it.',
   },
   {
+    id: 'cost',
     q: 'What does it cost?',
     a: '$1.99 a month, $19.99 a year, or $29.99 once. That is for Uplink itself; the answers run on the plan you already have, Claude or ChatGPT, and nothing is charged per text.',
   },
   {
+    id: 'chatgpt',
     q: 'Can it answer with ChatGPT instead?',
     a: 'Yes. Choose Codex in the menubar and Uplink answers with your ChatGPT plan instead of Claude. Everything else works the same way.',
   },
   {
+    id: 'sleep',
     q: 'What happens while my Mac sleeps?',
     a: 'Nothing, so Uplink keeps it from idle-sleeping while it runs. A laptop with its lid closed still sleeps unless it is on power with a display attached.',
   },
@@ -236,7 +261,22 @@ const faqs = [
         <div class="grid gap-12 items-center lg:gap-16 lg:grid-cols-[1.1fr_0.9fr] mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
           <div>
             <h2 id="download-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Download Uplink for Mac.</h2>
-            <p class="mt-4 max-w-[52ch] u-muted">A menubar app. You need Claude Code on a Claude plan, or Codex on a ChatGPT plan; Uplink takes care of the rest.</p>
+            <p class="mt-4 max-w-[52ch] u-muted">A menubar app. Uplink takes care of the rest.</p>
+
+            <ul class="grid gap-3 mt-8">
+              @foreach(requirements as requirement)
+                <li class="flex gap-3 items-baseline">
+                  <span class="shrink-0 size-4 translate-y-0.5 i-hugeicons-checkmark-circle-02 u-accent" aria-hidden="true"></span>
+                  <span class="max-w-[52ch]"><span class="font-medium">{{ requirement.need }}</span> <span class="u-muted">{{ requirement.detail }}</span></span>
+                </li>
+              @endforeach
+            </ul>
+
+            <p class="mt-4 max-w-[52ch] text-sm u-muted">
+              Texting yourself over satellite depends on how your iPhone routes a message to your own number, so
+              <a href="#satellite" class="underline underline-offset-4 hover:opacity-80">try it once before you rely on it</a>.
+            </p>
+
             <div class="flex flex-wrap gap-x-5 gap-y-3 items-center mt-8">
               <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
                 <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
@@ -244,6 +284,10 @@ const faqs = [
               </a>
               <p class="text-sm u-mono u-muted">{{ downloadMeta }}</p>
             </div>
+            <p class="mt-3 text-sm u-muted">
+              Open source, <a href="https://github.com/stacksjs/uplink/blob/main/LICENSE.md" class="underline underline-offset-4 hover:opacity-80">MIT licensed</a>.
+              <a href="https://github.com/stacksjs/uplink/releases" class="underline underline-offset-4 hover:opacity-80">Every release</a> is listed on GitHub.
+            </p>
 
             <ol class="grid gap-7 mt-12">
               @foreach(install as step)
@@ -305,7 +349,7 @@ const faqs = [
           <h2 id="questions-title" class="font-semibold text-3xl tracking-tight md:text-4xl">Questions</h2>
           <div class="mt-10 border-t u-line">
             @foreach(faqs as faq)
-              <details class="border-b u-line">
+              <details id="{{ faq.id }}" class="border-b scroll-mt-16 u-line">
                 <summary class="flex gap-6 items-center justify-between py-5 font-medium text-lg">
                   {{ faq.q }}
                   <span class="shrink-0 size-5 i-hugeicons-plus-sign u-chevron u-muted" aria-hidden="true"></span>
