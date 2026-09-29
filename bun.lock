@@ -11,7 +11,7 @@
         "bunfig": "^0.15.19",
         "pickier": "^0.1.65",
         "stacks": "^0.75.28",
-        "stripe": "22.3.2",
+        "stripe": "22.6.2",
       },
       "devDependencies": {
         "better-dx": "^0.2.24",
@@ -413,7 +413,7 @@
 
     "stacks-framework": ["stacks-framework@workspace:storage/framework"],
 
-    "stripe": ["stripe@22.3.2", "", { "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-O13QOvgEIQvDlTy6Ubb5kB980wpbhmoZNsgCXKILjCMZS67f+bW+6w99k3gnSi/N1lkryoj1WYdpGT5Wc5edjg=="],
+    "stripe": ["stripe@22.6.2", "", { "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew=="],
 
     "stx-router": ["stx-router@0.2.336", "", {}, "sha512-G78tp8+NC96E2z68FG31S54vcWqfIlsXK9G2j9BfPJUwIwbHdDj+WPLrODBFeU0/m6tPDElldFjOyCLIy+lPJA=="],
 

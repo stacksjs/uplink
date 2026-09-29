@@ -3,7 +3,7 @@ dependencies:
   # that writes this repository's lockfile format.
   bun: 1.4.2
   curl: ^8.22.0
-  git: ^2.47.0
-  sqlite: ^3.47.2
+  git: ^2.53.0
+  sqlite: ^3.53.4
   # The native runtime Uplink.app's menubar runs in (buddy build:desktop bundles it).
   craft-native.org: ^0.0.98
