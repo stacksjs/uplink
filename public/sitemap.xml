@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Four pages, matching the `const path` of the four public views. Adding a
+  public page means adding it here: nothing generates this file.
+
+  No <lastmod>: it was a hardcoded date on every entry, already wrong for `/`
+  the day after it was written, and a date that lies is worse for a crawler
+  than no date. No <priority> either, which Google has ignored since 2023.
+-->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://uplink.stacksjs.com/</loc><lastmod>2026-09-29</lastmod><priority>1.0</priority></url>
-  <url><loc>https://uplink.stacksjs.com/pricing</loc><lastmod>2026-09-29</lastmod><priority>0.8</priority></url>
-  <url><loc>https://uplink.stacksjs.com/privacy</loc><lastmod>2026-09-29</lastmod><priority>0.3</priority></url>
-  <url><loc>https://uplink.stacksjs.com/terms</loc><lastmod>2026-09-29</lastmod><priority>0.3</priority></url>
+  <url><loc>https://uplink.stacksjs.com/</loc></url>
+  <url><loc>https://uplink.stacksjs.com/pricing</loc></url>
+  <url><loc>https://uplink.stacksjs.com/privacy</loc></url>
+  <url><loc>https://uplink.stacksjs.com/terms</loc></url>
 </urlset>

@@ -241,4 +241,17 @@ jobs:
             *"not one Uplink issued"*) ;;
             *) echo "::error::/api/license/check did not answer as the license API: ${said:0:200}"; exit 1 ;;
           esac
-          echo "Home page, pricing, checkout, license API, 404s and assets check out."
+          # A miss has to say 404 in the status line, not only in the body: a
+          # crawler indexes a 200 whatever it reads, and a client treats it as
+          # a hit.
+          [ "$(status no-such-page-here)" = 404 ] || { echo "::error::A missing page answers $(status no-such-page-here), not 404."; exit 1; }
+          # Checked against the live site rather than the repository, because a
+          # CDN can serve its own managed robots.txt over this one and nothing
+          # in the repository would know.
+          [ "$(status sitemap.xml)" = 200 ] || { echo "::error::/sitemap.xml answers $(status sitemap.xml)."; exit 1; }
+          robots=$(curl -s --max-time 20 "${url}robots.txt")
+          case "$robots" in
+            *"Sitemap: https://uplink.stacksjs.com/sitemap.xml"*) ;;
+            *) echo "::error::/robots.txt is not the one in public/, so something is serving its own: ${robots:0:200}"; exit 1 ;;
+          esac
+          echo "Home page, pricing, checkout, license API, 404s, robots, sitemap and assets check out."

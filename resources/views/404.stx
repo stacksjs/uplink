@@ -2,6 +2,10 @@
 // The not-found page. With `ui.defaultViews: false` the framework's own
 // errors/404 view is not served, so the app answers with this instead.
 const title = 'Not found - Uplink'
+// The body said Not found and the status line said 200, so a crawler indexed
+// every wrong URL as a real page and a client treated the miss as a hit. The
+// dashboard already does this; this page did not.
+notFound()
 </script>
 
 @nolayout
