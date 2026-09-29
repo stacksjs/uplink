@@ -24,7 +24,7 @@ const software = {
   '@type': 'SoftwareApplication',
   'name': 'Uplink',
   'url': origin,
-  'description': 'Text your Mac from anywhere, even over satellite, and Claude Code answers by text.',
+  'description': 'Text your Mac from anywhere, even over satellite, and Claude Code or Codex answers by text.',
   'applicationCategory': 'DeveloperApplication',
   'operatingSystem': 'macOS 13 or later',
   'image': `${origin}/social/og.png`,
