@@ -47,6 +47,13 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
 through Full Disk Access, signing in to the agent you picked, and who may text it. Then text
 yourself `ping`.
 
+To check what you downloaded, compare it against the digest on the release page, which is also in
+[`resources/data/release.json`](resources/data/release.json):
+
+```bash
+shasum -a 256 ~/Downloads/Uplink.dmg
+```
+
 You need one of the two CLIs and a plan for it:
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code), the default. The menubar takes a
