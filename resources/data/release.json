@@ -1,6 +1,6 @@
 {
-  "version": "0.1.2",
-  "bytes": 34900445,
+  "version": "0.1.4",
+  "bytes": 34951546,
   "minimumMacOS": "13",
   "url": "https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg"
 }

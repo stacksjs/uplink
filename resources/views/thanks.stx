@@ -1,0 +1,91 @@
+<script server>
+/**
+ * /thanks - where Stripe Checkout returns after a purchase. It issues the
+ * license for that checkout (the same one on every reload) only once Stripe
+ * says it is paid; an unknown or missing session gets a plain thank-you with
+ * no claims and no key.
+ */
+import { thanksFor } from '../../app/Billing/license-store'
+import release from '../data/release.json'
+
+const path = '/thanks'
+const title = 'Thank you - Uplink'
+const description = 'Thanks for buying Uplink.'
+const noindex = true
+
+setResponseHeader('Cache-Control', 'no-store')
+const thanks = await thanksFor(query?.session_id)
+
+const planName = thanks?.plan?.name ?? ''
+const email = thanks?.email ?? ''
+const licenseKey = thanks?.licenseKey ?? ''
+const paid = Boolean(licenseKey)
+// Opens Uplink straight onto its activation, with the key filled in.
+const activateUrl = licenseKey ? `uplink://activate?key=${encodeURIComponent(licenseKey)}` : ''
+const downloadUrl = release.url
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    @include('site-head')
+  </head>
+  <body class="antialiased uplink">
+    @include('site-nav')
+    <main class="mx-auto px-4 py-24 sm:px-6 lg:py-32 max-w-2xl">
+      <span class="grid place-items-center size-12 rounded-full u-wash u-rise" style="--i: 0" aria-hidden="true">
+        <span class="size-6 i-hugeicons-checkmark-circle-02 u-accent"></span>
+      </span>
+      @if(paid)
+        <h1 class="mt-6 font-semibold text-4xl tracking-tight u-rise" style="--i: 1">You have Uplink {{ planName }}.</h1>
+        @if(email)
+          <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Your key is on its way to {{ email }}, and Stripe is sending the receipt.</p>
+        @endif
+
+        <section class="mt-10 p-6 border rounded-2xl u-line u-raised u-rise" style="--i: 3" aria-labelledby="license-title">
+          <h2 id="license-title" class="text-sm font-medium u-muted">Your license key</h2>
+          <p class="mt-2 font-medium text-2xl tracking-wide select-all u-mono">{{ licenseKey }}</p>
+          <p class="mt-2 text-sm u-muted">Keep it: it is how Uplink knows this Mac is paid for. Bookmark this page to find it again.</p>
+          <div class="flex flex-wrap gap-3 mt-5">
+            <a href="{{ activateUrl }}" class="u-btn u-btn-primary">Activate Uplink</a>
+            <a href="{{ downloadUrl }}" class="u-btn u-btn-ghost">
+              <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
+              Download for Mac
+            </a>
+          </div>
+          <p class="mt-3 text-xs u-muted">Activate opens Uplink with the key filled in. Or paste the key into Uplink's first setup step.</p>
+        </section>
+      @else
+        <h1 class="mt-6 font-semibold text-4xl tracking-tight u-rise" style="--i: 1">Thanks for choosing Uplink.</h1>
+        <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Your receipt comes from Stripe by email once the payment clears.</p>
+      @endif
+
+      <ol class="grid gap-6 mt-12 u-rise" style="--i: 3">
+        <li>
+          <h2 class="font-semibold text-lg">Download it and activate</h2>
+          <p class="mt-1 u-muted">Drag Uplink to Applications, open it, then activate with your key.</p>
+        </li>
+        <li>
+          <h2 class="font-semibold text-lg">Say yes three times</h2>
+          <p class="mt-1 u-muted">It opens the settings it needs, signs in to Claude in your browser, and asks once to use Messages.</p>
+        </li>
+        <li>
+          <h2 class="font-semibold text-lg">Text yourself "ping"</h2>
+          <p class="mt-1 u-muted">From your iPhone, anywhere, satellite included.</p>
+        </li>
+      </ol>
+
+      @if(!paid)
+        <div class="flex flex-wrap gap-3 mt-12">
+          <a href="{{ downloadUrl }}" class="u-btn u-btn-primary">
+            <span class="size-4 i-hugeicons-apple" aria-hidden="true"></span>
+            Download for Mac
+          </a>
+          <a href="/" class="u-btn u-btn-ghost">Back to the home page</a>
+        </div>
+      @endif
+    </main>
+    @include('site-footer')
+  </body>
+</html>

@@ -1,0 +1,88 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<meta name="description" content="{{ description }}">
+<link rel="canonical" href="https://uplink.stacksjs.com{{ path }}">
+@if(typeof noindex !== 'undefined' && noindex)
+  <meta name="robots" content="noindex">
+@endif
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://uplink.stacksjs.com{{ path }}">
+<meta property="og:title" content="{{ title }}">
+<meta property="og:description" content="{{ description }}">
+<meta property="og:image" content="https://uplink.stacksjs.com/images/california-night-1920.jpg">
+<meta property="og:image:alt" content="The California coast at night, photographed from the International Space Station">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap">
+<style>
+  /* Tokens. One accent: sodium amber, the colour of the city lights in the photos. */
+  :root {
+    --paper: #fafaf9;
+    --ink: #18181b;
+    --muted: #52525b;
+    --line: #e4e4e7;
+    --raised: #ffffff;
+    --accent: #f59e0b;
+    --accent-ink: #b45309;
+    --accent-wash: #fffbeb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0c0c0e;
+      --ink: #f4f4f5;
+      --muted: #a1a1aa;
+      --line: #27272a;
+      --raised: #141417;
+      --accent-ink: #fbbf24;
+      --accent-wash: #1c1508;
+    }
+  }
+
+  html body.uplink { background: var(--paper); color: var(--ink); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; }
+  .uplink .u-mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace; }
+  .uplink .u-muted { color: var(--muted); }
+  .uplink .u-accent { color: var(--accent-ink); }
+  .uplink .u-line { border-color: var(--line); }
+  .uplink .u-raised { background: var(--raised); }
+  .uplink .u-wash { background: var(--accent-wash); }
+  .uplink .u-num { font-variant-numeric: tabular-nums; }
+
+  /* Buttons: pills. Containers: 16px. That is the whole radius system. */
+  .uplink .u-btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; white-space: nowrap; border-radius: 9999px; padding: .75rem 1.25rem; font-weight: 600; transition: transform .2s cubic-bezier(.16, 1, .3, 1), background-color .2s, border-color .2s; }
+  .uplink .u-btn:active { transform: translateY(1px) scale(.98); }
+  .uplink .u-btn-primary { background: var(--accent); color: #18181b; }
+  .uplink .u-btn-primary:hover { background: #fbbf24; }
+  .uplink .u-btn-ghost { border: 1px solid var(--line); color: var(--ink); }
+  .uplink .u-btn-ghost:hover { border-color: var(--muted); }
+  .uplink a:focus-visible, .uplink summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+  .uplink .u-nav { background: color-mix(in srgb, var(--paper) 82%, transparent); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); }
+  @media (prefers-reduced-transparency: reduce) { .uplink .u-nav { background: var(--paper); backdrop-filter: none; } }
+  .uplink .u-nav a[aria-current="page"] { color: var(--ink); }
+
+  .uplink .u-code { background: #111113; color: #e4e4e7; border: 1px solid var(--line); }
+  .uplink .u-code .u-prompt { color: #fbbf24; user-select: none; }
+
+  /* The plan a person is most likely to want reads as lifted, not louder. */
+  .uplink .u-featured { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 30px 60px -30px rgb(245 158 11 / 0.45); }
+
+  .uplink details > summary { list-style: none; cursor: pointer; }
+  .uplink details > summary::-webkit-details-marker { display: none; }
+  .uplink details[open] .u-chevron { transform: rotate(45deg); }
+  .uplink .u-chevron { transition: transform .25s cubic-bezier(.16, 1, .3, 1); }
+
+  /* Motion. The hero arrives in reading order; each exchange reveals
+     question first, then answer, the order a text thread fills in. */
+  @media (prefers-reduced-motion: no-preference) {
+    .uplink .u-rise { animation: u-rise .8s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+    @keyframes u-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+    @supports (animation-timeline: view()) {
+      .uplink .u-reveal { animation: u-rise linear both; animation-timeline: view(); animation-range: entry 5% cover 30%; }
+      .uplink .u-reveal-late { animation: u-rise linear both; animation-timeline: view(); animation-range: entry 25% cover 40%; }
+    }
+  }
+</style>

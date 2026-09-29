@@ -1,0 +1,149 @@
+<script server>
+/**
+ * /pricing - the three ways to pay for Uplink, from app/Billing/plans.ts.
+ * Each button goes to /checkout/<plan>, which hands over to Stripe Checkout.
+ *
+ * Same design language as the home page: Geist, one amber accent, calm dark
+ * tech. The plan most people want long-term is lifted, not shouted.
+ */
+import { services } from '@stacksjs/config'
+import { formatCents, PLANS, SIX_MONTHS_FREE, yearlySavingPercent } from '../../app/Billing/plans'
+
+const path = '/pricing'
+const title = 'Pricing - Uplink'
+const description = 'Uplink is $1.99 a month, $19.99 a year, or $29.99 once. Every plan is the whole app, running on your own Claude or ChatGPT plan.'
+
+const yearlySaving = yearlySavingPercent()
+const freeMonths = SIX_MONTHS_FREE.months
+const badges = { monthly: '', yearly: `Save ${yearlySaving}%`, lifetime: 'Pay once' }
+const terms = {
+  monthly: 'Renews every month until cancelled.',
+  yearly: 'Renews every year until cancelled.',
+  lifetime: 'One payment. It never renews.',
+}
+const plans = PLANS.map(plan => ({
+  ...plan,
+  price: formatCents(plan.priceCents),
+  badge: badges[plan.id],
+  terms: terms[plan.id],
+  featured: plan.id === 'lifetime',
+}))
+
+// Only whether the key is a test key leaves the server, never the key.
+const testMode = String(services?.stripe?.secretKey ?? '').startsWith('sk_test')
+
+const included = [
+  { icon: 'i-hugeicons-satellite-02', text: 'Text your Mac from anywhere, satellite included' },
+  { icon: 'i-hugeicons-ai-brain-01', text: 'Claude Code or Codex, on the plan you already pay for' },
+  { icon: 'i-hugeicons-folder-code', text: 'Runs inside your repositories, with their CLAUDE.md and hooks' },
+  { icon: 'i-hugeicons-magic-wand-01', text: 'A menubar app that sets itself up' },
+  { icon: 'i-hugeicons-refresh', text: 'Every update, for as long as your plan lasts' },
+]
+
+const faqs = [
+  { q: 'Is anything charged per text?', a: 'No. Uplink costs the price above. The answers run on your own Claude or ChatGPT plan.' },
+  { q: 'Who handles the payment?', a: 'Stripe. You pay on Stripe\'s own checkout page, so your card never reaches Uplink or this site.' },
+  { q: 'Can I cancel?', a: 'Yes. Uplink\'s menubar has Manage Subscription, which opens Stripe\'s billing page: cancel there and you keep what you paid for until the period ends.' },
+  { q: 'Which one should I pick?', a: 'Monthly to try it on one trip. Yearly if you text your Mac through the year. Lifetime if you would rather pay once and be done.' },
+  { q: 'What else do I need?', a: 'A Mac on macOS 13 or later, an iPhone with iMessage, and Claude Code or Codex signed in on the Mac. Uplink walks you through the rest.' },
+]
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    @include('site-head')
+  </head>
+  <body class="antialiased uplink">
+    @include('site-nav')
+
+    <main>
+      <section class="mx-auto px-4 pb-10 pt-14 sm:px-6 lg:pt-24 max-w-6xl text-center">
+        <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono u-rise" style="--i: 0">Pricing</p>
+        <h1 class="mx-auto mt-4 max-w-[18ch] font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl u-rise" style="--i: 1">One app, three ways to pay.</h1>
+        <p class="mx-auto mt-5 max-w-[52ch] leading-relaxed text-lg u-muted u-rise" style="--i: 2">
+          Every plan is the whole of Uplink, with every update. It runs on your own Claude or ChatGPT plan, so nothing is charged per text.
+        </p>
+        @if(testMode)
+          <p class="inline-flex gap-2 items-center mt-8 px-4 py-2 rounded-full text-sm u-wash u-rise" style="--i: 3">
+            <span class="size-4 i-hugeicons-test-tube u-accent" aria-hidden="true"></span>
+            <span>Stripe is in test mode, so no card is charged. Try <span class="u-mono">4242 4242 4242 4242</span>, any future date and any CVC.</span>
+          </p>
+        @endif
+      </section>
+
+      <section class="mx-auto px-4 pb-20 sm:px-6 max-w-5xl" aria-label="Plans">
+        <div class="grid gap-5 items-stretch md:grid-cols-3">
+          @foreach(plans as plan)
+            <article class="flex flex-col p-7 border rounded-2xl u-line u-raised u-reveal {{ plan.featured ? 'u-featured' : '' }}">
+              <div class="flex gap-3 items-center justify-between">
+                <h2 class="font-semibold text-lg">{{ plan.name }}</h2>
+                @if(plan.badge)
+                  <span class="px-2.5 py-1 rounded-full text-xs font-medium u-wash u-accent">{{ plan.badge }}</span>
+                @endif
+              </div>
+              <p class="mt-5 flex gap-2 items-baseline">
+                <span class="font-semibold text-5xl tracking-tight u-num">{{ plan.price }}</span>
+                <span class="u-muted">{{ plan.cadence }}</span>
+              </p>
+              <p class="mt-3 leading-relaxed u-muted">{{ plan.blurb }}</p>
+              <div class="flex-1"></div>
+              <a href="/checkout/{{ plan.id }}" class="mt-8 w-full u-btn {{ plan.featured ? 'u-btn-primary' : 'u-btn-ghost' }}">Get {{ plan.name }}</a>
+              <p class="mt-3 text-center text-xs u-muted">{{ plan.terms }}</p>
+            </article>
+          @endforeach
+        </div>
+
+        <form action="/checkout/monthly" method="get" class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mt-6 px-7 py-5 rounded-2xl u-wash u-reveal">
+          <div>
+            <h2 class="font-semibold">Have a code?</h2>
+            <p class="mt-1 text-sm u-muted">A code gets you {{ freeMonths }} months of Monthly free, with no card until they end.</p>
+          </div>
+          <div class="flex gap-2">
+            <label for="code" class="sr-only">Code</label>
+            <input id="code" name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Code"
+              class="px-4 py-2.5 w-40 border rounded-full uppercase u-line u-raised u-mono" style="color: var(--ink)">
+            <button type="submit" class="u-btn u-btn-primary" style="padding: .625rem 1.1rem">Redeem</button>
+          </div>
+        </form>
+
+        <div class="grid gap-8 lg:gap-12 lg:grid-cols-[0.8fr_1.2fr] mt-16 p-7 sm:p-10 border rounded-2xl u-line u-reveal">
+          <div>
+            <h2 class="font-semibold text-2xl tracking-tight">Every plan includes</h2>
+            <p class="mt-3 max-w-[40ch] leading-relaxed u-muted">The plans differ only in how you pay. There is no tier with half the app.</p>
+          </div>
+          <ul class="grid gap-4">
+            @foreach(included as item)
+              <li class="flex gap-3 items-start">
+                <span class="grid place-items-center shrink-0 size-8 rounded-full u-wash" aria-hidden="true">
+                  <span class="size-4 u-accent {{ item.icon }}"></span>
+                </span>
+                <span class="pt-1">{{ item.text }}</span>
+              </li>
+            @endforeach
+          </ul>
+        </div>
+      </section>
+
+      <section class="border-t u-line" aria-labelledby="pricing-questions">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-24 max-w-3xl">
+          <h2 id="pricing-questions" class="font-semibold text-3xl tracking-tight">Questions about paying</h2>
+          <div class="mt-10 border-t u-line">
+            @foreach(faqs as faq)
+              <details class="border-b u-line">
+                <summary class="flex gap-6 items-center justify-between py-5 font-medium text-lg">
+                  {{ faq.q }}
+                  <span class="shrink-0 size-5 i-hugeicons-plus-sign u-chevron u-muted" aria-hidden="true"></span>
+                </summary>
+                <p class="pb-6 max-w-[62ch] leading-relaxed u-muted">{{ faq.a }}</p>
+              </details>
+            @endforeach
+          </div>
+        </div>
+      </section>
+    </main>
+
+    @include('site-footer')
+  </body>
+</html>

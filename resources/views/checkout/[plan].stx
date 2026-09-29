@@ -1,0 +1,68 @@
+<script server>
+/**
+ * /checkout/<plan> - create a Stripe Checkout session for the plan and send
+ * the browser to it (303). An unknown plan is a 404, which is also why the
+ * deploy check that /checkout/payment is not found still holds.
+ *
+ * One await: a view's server script may await only once.
+ */
+import { startCheckout } from '../../../app/Billing/checkout'
+
+const path = '/pricing'
+const title = 'Checkout - Uplink'
+const description = 'Opening Stripe Checkout for Uplink.'
+const noindex = true
+
+// `?code=` is a promotion code, honoured on Monthly only (see checkout.ts).
+const outcome = await startCheckout(params?.plan, undefined, undefined, query?.code)
+
+// A session is single-use and personal: nothing may cache this answer.
+setResponseHeader('Cache-Control', 'no-store')
+if (outcome.kind === 'unknown-plan') {
+  notFound()
+}
+else if (outcome.kind === 'redirect') {
+  setResponseStatus(303)
+  setResponseHeader('Location', outcome.url)
+}
+else if (outcome.kind === 'bad-code') {
+  setResponseStatus(400)
+}
+else {
+  setResponseStatus(503)
+  console.error(`[checkout] ${params?.plan}: ${outcome.reason}`)
+}
+
+const stripeUrl = outcome.kind === 'redirect' ? outcome.url : ''
+const failed = outcome.kind === 'unavailable'
+const badCode = outcome.kind === 'bad-code' ? outcome.reason : ''
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    @include('site-head')
+    @if(stripeUrl)
+      <meta http-equiv="refresh" content="0; url={{ stripeUrl }}">
+    @endif
+  </head>
+  <body class="antialiased uplink">
+    @include('site-nav')
+    <main class="mx-auto px-4 py-28 sm:px-6 max-w-xl text-center">
+      @if(badCode)
+        <h1 class="font-semibold text-3xl tracking-tight">That code did not work.</h1>
+        <p class="mt-4 leading-relaxed u-muted">{{ badCode }}</p>
+        <a href="/pricing" class="mt-8 u-btn u-btn-ghost">Back to pricing</a>
+      @elseif(failed)
+        <h1 class="font-semibold text-3xl tracking-tight">Checkout is not available right now.</h1>
+        <p class="mt-4 leading-relaxed u-muted">Nothing was charged. Please try again in a few minutes.</p>
+        <a href="/pricing" class="mt-8 u-btn u-btn-ghost">Back to pricing</a>
+      @else
+        <h1 class="font-semibold text-3xl tracking-tight">Opening Stripe Checkout</h1>
+        <p class="mt-4 leading-relaxed u-muted">If nothing happens, <a href="{{ stripeUrl }}" class="underline underline-offset-4">continue to Stripe</a>.</p>
+      @endif
+    </main>
+    @include('site-footer')
+  </body>
+</html>

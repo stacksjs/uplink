@@ -14,6 +14,7 @@ import { formatDuration, truncate } from './format'
 import { MessagesAccessError, MessagesDb } from './messages-db'
 import { AppleScriptSender } from './sender'
 import { cleanToken, DATA_DIR, DATABASE_PATH, readSettings, readToken, settingsEnv, tokenLooksValid, writeSettings, writeToken } from './settings'
+import { checkLicenseKey, describeLicense, isLicensed, normalizeKey, portalUrl, PRICING_URL, readLicenseKey, readLicenseState, RECHECK_MS, writeLicenseKey, writeLicenseState } from './license'
 import { SignIn } from './sign-in'
 import { SqliteStore } from './sqlite-store'
 import { Uplink } from './uplink'
@@ -176,6 +177,13 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   let messagesError: string | null = null
   let uplink: Uplink | null = null
   let knownAllowed: string[] = []
+  // Licensing: the key in the Keychain and the server's last answer, kept so a
+  // Mac off-grid keeps answering (license.ts). Texts are answered only while
+  // `isLicensed(license)`; everything else - setup, Full Disk Access, signing
+  // in - works before a purchase, so buying is the last step, not the first.
+  let licenseKey = readLicenseKey()
+  let license = readLicenseState()
+  let licenseProblem: string | null = null
   const engines = new Map<string, EngineState>()
   let checkingEngines = false
   let automation: AutomationState | null = null
@@ -288,8 +296,66 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       messagesError = error instanceof MessagesAccessError ? 'Uplink needs Full Disk Access to read Messages.' : String(error)
       return
     }
+    // Messages is open either way - setup needs it for Full Disk Access and
+    // for finding this Mac's own numbers - but texts are answered only on a
+    // license.
+    if (!isLicensed(license))
+      return
     uplink = new Uplink({ config, messages, sender, engine: selectedEngine(config), store })
     await uplink.start()
+  }
+
+  /** Start or stop answering texts to match the license. */
+  const followLicense = async (): Promise<void> => {
+    if (isLicensed(license))
+      await startWatching()
+    else if (uplink) {
+      await uplink.stop()
+      uplink = null
+    }
+  }
+
+  /**
+   * Ask the license server about the key in the Keychain. An unreachable server
+   * changes nothing (the last answer stands, off-grid); an answer replaces it.
+   */
+  const refreshLicense = async (): Promise<void> => {
+    if (!licenseKey)
+      return
+    const result = await checkLicenseKey(licenseKey)
+    if (result.kind === 'answered') {
+      license = result.state
+      licenseProblem = null
+      writeLicenseState(license)
+    }
+    else if (result.kind === 'unknown-key') {
+      license = { valid: false, plan: null, status: 'unknown', email: null, expiresAt: null, endsAtPeriodEnd: false, checkedAt: Date.now() }
+      licenseProblem = 'The license server does not know that key.'
+      writeLicenseState(license)
+    }
+    else {
+      licenseProblem = `Could not reach the license server: ${result.error}`
+    }
+    await followLicense()
+  }
+
+  /** Take a key the person typed, pasted or clicked: keep it only if the server says it is good. */
+  const activate = async (raw: unknown): Promise<{ ok: boolean, error?: string }> => {
+    const key = normalizeKey(raw)
+    if (!key)
+      return { ok: false, error: 'That is not an Uplink license key. It looks like UPLK-XXXX-XXXX-XXXX-XXXX.' }
+    const result = await checkLicenseKey(key)
+    if (result.kind === 'unreachable')
+      return { ok: false, error: `Could not reach the license server to check the key: ${result.error}` }
+    if (result.kind === 'unknown-key')
+      return { ok: false, error: 'Uplink did not issue that key. Check it against your thank-you page.' }
+    writeLicenseKey(key)
+    licenseKey = key
+    license = result.state
+    licenseProblem = null
+    writeLicenseState(license)
+    await followLicense()
+    return result.state.valid ? { ok: true } : { ok: false, error: describeLicense(result.state) }
   }
 
   const restartWatching = async (): Promise<void> => {
@@ -297,6 +363,8 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     uplink = null
     await startWatching()
   }
+
+  const recheckLicense = setInterval(() => void refreshLicense(), RECHECK_MS)
 
   // Until Full Disk Access is granted, try again every few seconds: the
   // grant should take effect without the person having to relaunch. Then take
@@ -319,6 +387,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
   }, 15_000)
 
   await startWatching()
+  void refreshLicense()
   void checkEngines().then(advanceSetup)
   advanceSetup()
 
@@ -339,8 +408,23 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     // the handles it last found still apply when it resumes.
     if (uplink)
       knownAllowed = uplink.allowedHandles
+    // Before a license, or while paused, there is no watcher to ask; Messages
+    // itself says whose Mac this is.
+    else if (messages && knownAllowed.length === 0) {
+      try {
+        knownAllowed = messages.ownHandles()
+      }
+      catch {}
+    }
     const allowed = uplink ? knownAllowed : settings.allowed.length > 0 ? settings.allowed : knownAllowed
     const checks: PopoverCheck[] = [
+      {
+        id: 'license',
+        name: 'Activate Uplink',
+        ok: isLicensed(license),
+        detail: licenseProblem && !isLicensed(license) ? licenseProblem : describeLicense(license),
+        informational: false,
+      },
       {
         id: 'fda',
         name: 'Read Messages',
@@ -418,6 +502,15 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       active,
       recent,
       settings: { allowed: settings.allowed, engine: settings.engine, openAtLogin: settings.openAtLogin, paused: settings.paused, model: settings.model },
+      license: {
+        licensed: isLicensed(license),
+        plan: license?.plan ?? null,
+        summary: describeLicense(license),
+        // The portal manages subscriptions; lifetime has nothing to manage.
+        manageable: Boolean(licenseKey && license?.plan && license.plan !== 'lifetime'),
+        // Enough to recognise it by, never the key itself.
+        keyHint: licenseKey ? licenseKey.slice(-4) : null,
+      },
       engines: allEngines(config).map(engine => ({ id: engine.id, label: engine.label })),
       lastError: uplink?.lastError ?? null,
       signIn: signIn.state,
@@ -476,6 +569,24 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
             Bun.spawnSync(['open', url])
           return json({ ok: Boolean(url), url })
         }
+
+        case '/api/license/activate':
+          return json({ ...await activate(body.key), ...status() })
+
+        case '/api/license/refresh':
+          await refreshLicense()
+          return json(status())
+
+        case '/api/license/portal': {
+          const url = licenseKey ? await portalUrl(licenseKey) : null
+          if (url)
+            Bun.spawnSync(['open', url])
+          return json({ ok: Boolean(url), error: url ? undefined : 'Could not open billing right now. Try again in a minute.' })
+        }
+
+        case '/api/open/pricing':
+          Bun.spawnSync(['open', PRICING_URL])
+          return json({ ok: true })
 
         case '/api/engine/sign-in':
           startSignIn()
@@ -552,6 +663,7 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
     },
     stop: async () => {
       clearInterval(retry)
+      clearInterval(recheckLicense)
       signIn.cancel()
       clearInterval(keepMessagesOpen)
       await uplink?.stop()

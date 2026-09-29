@@ -1,0 +1,39 @@
+<script server>
+// Sent once, when a purchase becomes a license (app/Billing/licenses.ts).
+// Built from the Stacks email components (<EmailLayout>, <EmailCode>, ...), in
+// Uplink's colours: amber accent, dark ink.
+//
+// The button goes to the thank-you page over https, which holds the
+// uplink://activate button: mail clients drop links with a custom scheme.
+const planName = props.planName || 'Uplink'
+const licenseKey = props.licenseKey || ''
+const activateUrl = props.activateUrl || 'https://uplink.stacksjs.com/pricing'
+const downloadUrl = props.downloadUrl || 'https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg'
+const renewal = props.renewal || ''
+const subject = props.subject || 'Your Uplink license key'
+</script>
+
+<EmailLayout
+  title="{{ subject }}"
+  preheader="Your key is {{ licenseKey }}. Uplink asks for it once."
+  brand="Uplink"
+  brandUrl="https://uplink.stacksjs.com"
+  accent="#f59e0b"
+  footer="You are getting this because you bought Uplink. Keep it: it is how you find your key again."
+>
+  <EmailText size="heading">You have Uplink {{ planName }}.</EmailText>
+  <EmailText>Here is your license key. Uplink asks for it once, in its first setup step, and keeps it in your Keychain.</EmailText>
+
+  <EmailCode>{{ licenseKey }}</EmailCode>
+
+  <EmailButton href="{{ activateUrl }}" bg="#f59e0b" color="#18181b">Activate Uplink</EmailButton>
+
+  @if(renewal)
+    <EmailText size="sm">{{ renewal }}</EmailText>
+  @endif
+
+  <EmailDivider />
+
+  <EmailText size="sm">Not installed yet? <a href="{{ downloadUrl }}" style="color:#b45309;text-decoration:underline;">Download Uplink for Mac</a>, drag it to Applications and open it. It walks you through the rest.</EmailText>
+  <EmailText size="sm" spacing="0">To cancel, change your card or get an invoice, choose Manage in Uplink's menubar.</EmailText>
+</EmailLayout>

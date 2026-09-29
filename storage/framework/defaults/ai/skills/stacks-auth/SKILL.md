@@ -75,7 +75,8 @@ The `PersonalAccessToken` model maps the same table, so `owner.with('tokenable')
 lists exactly what `createToken` minted. It deliberately generates no CRUD
 routes: minting and revoking both carry semantics a generic route does not.
 - `Auth.once(credentials: AuthCredentials): Promise<boolean>` — one-time auth without token
-- `Auth.requestToken(credentials, clientId, clientSecret): Promise<{ token } | null>` — OAuth token request
+- `Auth.requestUserTokenWithClient(credentials, clientId, clientSecret): Promise<{ token } | null>` authenticates both a legacy OAuth client and an end user password, then issues a user token. It is not the client credentials grant.
+- `Auth.requestToken(...)` is the deprecated compatibility alias for that same legacy exchange. New delegated integrations use the authorization-code provider.
 
 ### User State
 - `Auth.user(): Promise<UserModel | undefined>` — get authenticated user from bearer token
@@ -154,6 +155,19 @@ routes: minting and revoking both carry semantics a generic route does not.
 - `findClient(clientId): Promise<OAuthClient | null>`
 - `createClient(options: CreateClientOptions): Promise<CreateClientResult>`
 - `revokeClient(clientId): Promise<void>`
+
+### OAuth Provider and PKCE
+
+The authorization server is opt-in through `config/auth.ts` under
+`oauthProvider`. It is separate from social sign-in, where Stacks is the OAuth
+client. The provider profile is Authorization Code with S256 PKCE and rotating
+refresh tokens. It does not support implicit or password grants.
+
+- `resolveOAuthProviderConfig(options)` returns `null` unless explicitly enabled
+- `generatePkceVerifier()` creates a 256-bit RFC 7636 verifier
+- `createS256CodeChallenge(verifier)` derives its S256 challenge
+- `verifyS256CodeChallenge(verifier, challenge)` validates without a plain fallback
+- `isValidPkceVerifier(value)` checks the required 43 to 128 character syntax
 
 ## Two-Factor Authentication (authenticator.ts)
 
