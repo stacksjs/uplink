@@ -66,6 +66,12 @@ interface ChatState {
 /** Two copies of one self-text are written within a few seconds of each other. */
 const DUPLICATE_WINDOW_MS = 15_000
 const SENT_MEMORY_MS = 30 * 60_000
+/**
+ * A skipped text older than this gets no mention. Waking a Mac that slept a
+ * week should not text about Tuesday, and by then whoever sent it has long
+ * since given up on it.
+ */
+const STALE_REPLY_CEILING_MS = 24 * 60 * 60_000
 const OWN_HANDLES_REFRESH_MS = 10 * 60_000
 
 const consoleLogger: Logger = {
@@ -81,6 +87,8 @@ export class Uplink {
   private readonly sent: RecentTexts
   private readonly chats = new Map<string, ChatState>()
   private readonly lastCommand = new Map<string, number>()
+  /** Texts this tick found too old to run, by chat, reported once at the end. */
+  private readonly skipped = new Map<string, { target: ReplyTarget, count: number, newestAt: number }>()
   private own = new Set<string>()
   private allowed = new Set<string>()
   private ownRefreshedAt = 0
@@ -212,6 +220,7 @@ export class Uplink {
         this.cursor = message.rowid
         await this.deps.store.setCursor(this.cursor)
       }
+      await this.reportSkipped()
       this.lastPollAt = this.now()
       this.lastError = null
     }
@@ -254,8 +263,14 @@ export class Uplink {
       return
     }
 
-    if (this.now() - message.sentAt > this.config.catchUpMs) {
-      this.log.info(`Skipping stale text from ${formatDuration(this.now() - message.sentAt)} ago: ${truncate(verdict.text, 60)}`)
+    const age = this.now() - message.sentAt
+    if (age > this.config.catchUpMs) {
+      this.log.info(`Skipping stale text from ${formatDuration(age)} ago: ${truncate(verdict.text, 60)}`)
+      // `status` and `stop` are answered live or not at all: reporting that
+      // the status someone asked for at midnight went unanswered is noise.
+      // Past the ceiling nothing is a live question either.
+      if (!parseControl(verdict.text) && age <= STALE_REPLY_CEILING_MS)
+        this.noteSkipped(message)
       return
     }
 
@@ -325,6 +340,45 @@ export class Uplink {
     }
 
     await this.begin(state, job)
+  }
+
+  /**
+   * Remember a text that was too old to run. Silence was the previous answer,
+   * and over a satellite link, where the send itself may have taken minutes,
+   * silence is the worst one available.
+   */
+  private noteSkipped(message: IncomingMessage): void {
+    const existing = this.skipped.get(message.chatGuid)
+    if (existing) {
+      existing.count += 1
+      existing.newestAt = Math.max(existing.newestAt, message.sentAt)
+      return
+    }
+    this.skipped.set(message.chatGuid, {
+      target: { chatGuid: message.chatGuid, handle: message.chatIdentifier, service: message.service },
+      count: 1,
+      newestAt: message.sentAt,
+    })
+  }
+
+  /**
+   * One reply per chat per wake, whatever the backlog. A Mac that slept
+   * through eight texts owes an explanation, not eight of them: the inbound
+   * link is thin and a wall of texts is worse than none.
+   *
+   * It never runs the task. That is the whole reason the cutoff exists, and a
+   * replayed day of texts could do real work nobody wants now. Sending it
+   * again is one text, and the reply says so.
+   */
+  private async reportSkipped(): Promise<void> {
+    const batches = [...this.skipped.values()]
+    this.skipped.clear()
+    for (const batch of batches) {
+      const ago = formatDuration(this.now() - batch.newestAt)
+      await this.reply(batch.target, batch.count === 1
+        ? `That arrived ${ago} ago, while this Mac was asleep, so I did not run it. Send it again to run it now.`
+        : `${batch.count} texts arrived while this Mac was asleep, the most recent ${ago} ago. I ran none of them. Send one again to run it now.`)
+    }
   }
 
   private threadIsFresh(conversation: ConversationRecord): boolean {
