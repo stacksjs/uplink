@@ -7,7 +7,10 @@
 // The preview cards are generated from config/images.ts by
 // `buddy generate:images`: one per page that has its own, else the site card.
 // The prices in the structured data come from the same plans the pricing
-// page renders, so a search result can never quote an old price.
+// page renders, and the version and the macOS floor come from the same
+// release.json the download button reads, so a search result can never quote
+// an old price or a version nobody can download.
+import release from '../data/release.json'
 import { PLANS } from '../../app/Billing/plans'
 
 const origin = 'https://uplink.stacksjs.com'
@@ -26,8 +29,10 @@ const software = {
   'url': origin,
   'description': 'Text your Mac from anywhere, even over satellite, and Claude Code or Codex answers by text.',
   'applicationCategory': 'DeveloperApplication',
-  'operatingSystem': 'macOS 13 or later',
+  'operatingSystem': `macOS ${release.minimumMacOS} or later`,
+  'softwareVersion': release.version,
   'image': `${origin}/social/og.png`,
+  'sameAs': ['https://github.com/stacksjs/uplink'],
   // Stored in cents; schema.org wants the decimal amount.
   'offers': PLANS.map(plan => ({
     '@type': 'Offer',
