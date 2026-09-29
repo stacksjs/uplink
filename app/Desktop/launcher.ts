@@ -11,14 +11,14 @@
  * Run from source for development with `bun app/Desktop/launcher.ts`; Craft
  * then comes from CRAFT_BIN or PATH (pantry installs it).
  */
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
 import { format } from 'node:util'
 import pkg from '../../package.json'
 import { agentPath } from '../Uplink/agent-path'
 import { acquireSingleInstance, startDesktopAgent } from '../Uplink/desktop-agent'
-import { LOG_PATH } from '../Uplink/settings'
+import { installCrashHandlers, writeLog } from '../Uplink/log'
 
 // Launched from Finder or from its own LaunchAgent, this process gets the bare
 // launchd PATH, and everything below it inherits that: the engines, their
@@ -28,13 +28,30 @@ import { LOG_PATH } from '../Uplink/settings'
 process.env.PATH = agentPath()
 
 // Launched from Finder or at login there is no terminal, so keep a log where
-// Console.app looks for one.
+// Console.app looks for one. From a terminal the developer keeps stderr.
 if (!process.stdout.isTTY) {
-  mkdirSync(dirname(LOG_PATH), { recursive: true })
   for (const level of ['log', 'warn', 'error'] as const) {
-    console[level] = (...args: unknown[]) => appendFileSync(LOG_PATH, `${new Date().toISOString()} ${format(...args)}\n`)
+    console[level] = (...args: unknown[]) => writeLog(format(...args))
   }
 }
+
+/**
+ * Whether the things `shutdown` closes over exist yet. A crash during startup
+ * is both the one most worth reporting and the one where calling `shutdown`
+ * would itself throw, so that case exits directly. The single instance lock is
+ * reaped by the next start.
+ */
+let running = false
+
+installCrashHandlers({
+  shutdown: (code) => {
+    if (!running)
+      process.exit(code)
+    // A hung agent.stop() must not keep a half dead process alive.
+    setTimeout(() => process.exit(code), 3000).unref()
+    void shutdown(code)
+  },
+})
 
 if (!acquireSingleInstance()) {
   console.log('[uplink] already running')
@@ -84,6 +101,9 @@ void new Response(craft.stderr).text().then((stderr) => {
 
 // The point is answering while you are away, so hold off idle sleep.
 const keepAwake = Bun.spawn(['/usr/bin/caffeinate', '-i', '-w', String(process.pid)], { stdio: ['ignore', 'ignore', 'ignore'] })
+// Everything `shutdown` touches now exists, so a crash from here on can go
+// through it rather than exiting on the spot.
+running = true
 
 let stopping = false
 async function shutdown(code: number): Promise<never> {
