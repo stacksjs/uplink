@@ -179,6 +179,10 @@
       </div>
     </header>
     <p class="error pad" id="last-error" hidden></p>
+    <!-- Shown in every state, unlike #last-error and unlike the setup steps.
+         A database Uplink could not open is not a step anyone performs and not
+         a reason to call the app unready, so it has nowhere else to appear. -->
+    <p class="error pad" id="notice" hidden></p>
 
     <section id="setup" hidden>
       <ol class="steps">
@@ -468,6 +472,9 @@
 
       $('#last-error').hidden = setup || !status.lastError
       $('#last-error').textContent = status.lastError || ''
+
+      $('#notice').hidden = !status.notice
+      $('#notice').textContent = status.notice || ''
 
       $('#setup').hidden = !setup
       $('#settings').hidden = setup

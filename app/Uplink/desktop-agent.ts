@@ -477,19 +477,6 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
             : automation?.detail ?? 'Uplink asks for this once the steps above are done.'),
         informational: false,
       },
-      // Only when there is something to say. An intact database is not a step
-      // anyone performs, and a broken one is not a reason to call the app
-      // unready: it is still reading texts and still answering them, it just
-      // will not remember any of it. See `SqliteStore.schemaError`.
-      ...(store.schemaError
-        ? [{
-            id: 'database',
-            name: 'History',
-            ok: false,
-            detail: store.schemaError,
-            informational: true,
-          }]
-        : []),
     ]
     // An engine the person has not selected must not hold the app in setup.
     const ready = checks.every(check => check.ok || check.informational)
@@ -513,6 +500,11 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       },
       engines: allEngines(config).map(engine => ({ id: engine.id, label: engine.label })),
       lastError: uplink?.lastError ?? null,
+      // Not a check: a broken database is not a setup step anyone performs,
+      // and it must not hold the app in `setup` when it is still answering
+      // texts. The popover shows this in every state, which a check row cannot
+      // do. See `SqliteStore.schemaError`.
+      notice: store.schemaError,
       signIn: signIn.state,
     }
   }

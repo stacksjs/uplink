@@ -1,6 +1,7 @@
 import type { ConversationRecord, RunRecord, Store } from './store'
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 
 /**
@@ -17,8 +18,13 @@ import { dirname } from 'node:path'
  * copy: the first text after the update would fail on the INSERT, for every
  * existing user, on every message. That is why the tables are described as
  * data below rather than as one block of SQL. The same description creates a
- * new database and tells an old one which columns it is missing, so adding a
- * column means editing `TABLES`, and there is no second place to forget.
+ * new database and tells an old one which columns it is missing.
+ *
+ * `TABLES` is not the only place a `runs` column is named: `RUN_COLUMNS` maps
+ * it to its field and `recentRuns` reads it back. TypeScript ties
+ * `RUN_COLUMNS` to `RunRecord` but cannot tie either to `TABLES`, so a test
+ * does it instead. Adding a column means editing both, and the suite says so
+ * rather than a customer's Mac.
  */
 
 export interface RunRow extends RunRecord {
@@ -91,7 +97,7 @@ export const TABLES: TableSpec[] = [
   },
 ]
 
-const RUN_COLUMNS: Record<keyof RunRecord, string> = {
+export const RUN_COLUMNS: Record<keyof RunRecord, string> = {
   chatGuid: 'chat_guid',
   messageGuid: 'message_guid',
   prompt: 'prompt',
@@ -111,19 +117,24 @@ const RUN_COLUMNS: Record<keyof RunRecord, string> = {
  * Bring a database up to the shape `TABLES` describes: create the tables it
  * does not have, and add to the ones it does any column it is missing.
  *
- * Forward only, and idempotent, so it runs on every start and costs one
- * `PRAGMA table_info` per table once a database is current. The whole thing is
- * one transaction, which in SQLite covers the `ALTER TABLE`s and the version
- * stamp together: a database is either fully updated or untouched, never left
- * halfway by a Mac that went to sleep.
+ * Forward only, and idempotent, so it runs on every start. The work is decided
+ * by reading first, and a database that is already current returns before the
+ * transaction opens. That matters because opening one takes a write lock, and
+ * during an update two Uplinks hold the same file for a moment: a start that
+ * wrote on every launch would lose that race, and the caller answers a lost
+ * race by abandoning the file. Almost every launch is the no-work case.
+ *
+ * When there is work it is one transaction, which in SQLite covers the
+ * `ALTER TABLE`s and the version stamp together: a database is either fully
+ * updated or untouched, never left halfway by a Mac that went to sleep.
  */
 export function migrate(db: Database, tables: TableSpec[] = TABLES): void {
+  if (isCurrent(db, tables))
+    return
+
   db.transaction(() => {
     for (const table of tables) {
-      // Empty means the table does not exist, which is also how a brand new
-      // file answers, so one query covers both cases.
-      const present = new Set((db.query(`PRAGMA table_info(${table.name})`).all() as Array<{ name: string }>)
-        .map(column => column.name))
+      const present = columnsOf(db, table.name)
       const columns = Object.entries(table.columns)
 
       if (present.size === 0) {
@@ -138,6 +149,26 @@ export function migrate(db: Database, tables: TableSpec[] = TABLES): void {
     // Interpolated, not bound: PRAGMA takes no parameter.
     db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   })()
+}
+
+/**
+ * Whether the database already has every table and column `tables` names, and
+ * carries this build's version. Reads only, so it is safe to ask while another
+ * process is writing.
+ */
+function isCurrent(db: Database, tables: TableSpec[]): boolean {
+  if (schemaVersion(db) !== SCHEMA_VERSION)
+    return false
+  return tables.every((table) => {
+    const present = columnsOf(db, table.name)
+    return present.size > 0 && Object.keys(table.columns).every(name => present.has(name))
+  })
+}
+
+/** Empty means the table does not exist, which is also how a new file answers. */
+function columnsOf(db: Database, table: string): Set<string> {
+  return new Set((db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    .map(column => column.name))
 }
 
 export function schemaVersion(db: Database): number {
@@ -165,7 +196,13 @@ export class SqliteStore implements Store {
       this.db = open(path)
     }
     catch (error) {
-      this.schemaError = `${message(error)}. Uplink is answering texts but not saving them.`
+      // Written for whoever reads it in the popover, not for whoever wrote
+      // this: what is happening, and the one thing they can do about it.
+      this.schemaError = [
+        'Uplink is answering texts but not saving them.',
+        `Its history file could not be opened (${message(error)}).`,
+        `Quit and reopen Uplink to try again, or delete ${tilde(path)} to start a fresh history.`,
+      ].join(' ')
       this.db = open(':memory:')
     }
   }
@@ -249,9 +286,13 @@ export class SqliteStore implements Store {
 function open(path: string): Database {
   const db = new Database(path, { create: true })
   try {
-    // A second Uplink reading the same file is the normal case during an
-    // update, and WAL is what lets it read while this one writes.
+    // A second Uplink on the same file is the normal case during an update.
+    // WAL is what lets it read while this one writes, and the timeout is what
+    // stops the one real upgrade from failing because the other one had the
+    // lock for a moment. Without it SQLite gives up at once and the caller
+    // reads that as a broken file.
     db.exec('PRAGMA journal_mode = WAL;')
+    db.exec('PRAGMA busy_timeout = 5000;')
     migrate(db)
     return db
   }
@@ -263,4 +304,9 @@ function open(path: string): Database {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function tilde(path: string): string {
+  const home = homedir()
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
 }
