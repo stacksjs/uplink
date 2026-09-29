@@ -73,6 +73,21 @@ const install = [
   { verb: 'Text it', body: 'Send yourself "ping" from your iPhone. The answer starts with a satellite.' },
 ]
 
+// What a text can actually do, and what cannot reach it. The page asks for
+// Full Disk Access and an unattended agent, and said nothing about either.
+const power = [
+  { title: 'Approvals are off', body: 'Nobody is at the Mac to answer a prompt, so there are none. Claude Code runs with bypassPermissions, Codex with bypass.' },
+  { title: 'It can read, write and run', body: 'Inside the directory your text names, with your permissions. The same authority you have at a terminal on that Mac.' },
+  { title: 'So your phone is the key', body: 'An unlocked phone with access to the allowed thread can command your Mac. Treat the allow list the way you treat an SSH key.' },
+]
+
+const limits = [
+  { title: 'iMessage only', body: 'SMS is refused outright. A forwarded SMS sender id can be spoofed through a bulk gateway, and the other side of that door is an agent with approvals off.' },
+  { title: 'One to one only', body: 'A group chat never reaches it, whoever is in it.' },
+  { title: 'Handles you allow', body: 'Empty means this Mac\'s own Messages handles, so a default install answers only you.' },
+  { title: 'Nothing stale', body: 'A text older than the catch-up window is not run, so a Mac waking up cannot replay a day of instructions.' },
+]
+
 const pricing = PLANS.map(plan => ({ ...plan, price: formatCents(plan.priceCents) }))
 const yearlySaving = yearlySavingPercent()
 
@@ -186,7 +201,7 @@ const faqs = [
           <div class="lg:sticky lg:top-28 lg:self-start">
             <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">How it works</p>
             <h2 id="how-title" class="mt-3 font-semibold text-3xl tracking-tight md:text-4xl">From a text to an agent session, and back.</h2>
-            <p class="mt-4 max-w-[46ch] u-muted">No server in between. Your Mac reads the message, does the work and answers through Messages.</p>
+            <p class="mt-4 max-w-[46ch] u-muted">Your Mac reads the message, does the work and answers through Messages. The agent sends your prompt to Anthropic or OpenAI under your own account, and <a href="/privacy" class="underline underline-offset-4 hover:opacity-80">nothing else leaves</a>.</p>
           </div>
           <ol class="grid gap-10">
             @foreach(steps as step)
@@ -250,10 +265,51 @@ const faqs = [
               </span>
               <div>
                 <h3 class="font-semibold text-xl">Nobody else can use it</h3>
-                <p class="mt-1 leading-relaxed u-muted">Only one-to-one chats with handles you allow. Group chats are ignored, and only Uplink.app gets Full Disk Access, not your terminal.</p>
+                <p class="mt-1 leading-relaxed u-muted">Only one-to-one chats with handles you allow. Group chats are ignored, and only Uplink.app gets Full Disk Access, not your terminal. <a href="#security" class="underline underline-offset-4 hover:opacity-80">What a text can do</a>.</p>
               </div>
             </article>
           </div>
+        </div>
+      </section>
+
+      <section id="security" class="border-t scroll-mt-16 u-line" aria-labelledby="security-title">
+        <div class="mx-auto px-4 py-20 sm:px-6 lg:py-28 max-w-6xl">
+          <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono">Before you install it</p>
+          <h2 id="security-title" class="mt-3 max-w-[20ch] font-semibold text-3xl tracking-tight md:text-4xl">A text runs a real agent, unattended.</h2>
+          <p class="mt-4 max-w-[58ch] u-muted">
+            That is the product, and it is worth knowing before you point it at a Mac that matters.
+          </p>
+
+          <div class="grid gap-12 mt-14 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <h3 class="font-semibold text-lg">What a text can do</h3>
+              <ul class="grid gap-5 mt-6">
+                @foreach(power as item)
+                  <li class="u-reveal">
+                    <p class="font-medium">{{ item.title }}</p>
+                    <p class="mt-1 max-w-[52ch] leading-relaxed u-muted">{{ item.body }}</p>
+                  </li>
+                @endforeach
+              </ul>
+            </div>
+
+            <div>
+              <h3 class="font-semibold text-lg">What cannot reach it</h3>
+              <ul class="grid gap-5 mt-6">
+                @foreach(limits as item)
+                  <li class="u-reveal">
+                    <p class="font-medium">{{ item.title }}</p>
+                    <p class="mt-1 max-w-[52ch] leading-relaxed u-muted">{{ item.body }}</p>
+                  </li>
+                @endforeach
+              </ul>
+            </div>
+          </div>
+
+          <p class="mt-14 max-w-[58ch] u-muted">
+            Your prompt and whatever the agent reads go to Anthropic or OpenAI under your own account. Your texts go through Apple, as any iMessage does. A licence check reaches uplink.stacksjs.com every six hours and sends the key, nothing else.
+            <a href="/privacy" class="underline underline-offset-4 hover:opacity-80">The whole of it is on the privacy page</a>.
+          </p>
         </div>
       </section>
 
