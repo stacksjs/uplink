@@ -23,7 +23,7 @@ const sections = [
     heading: 'What stays on your Mac',
     paragraphs: [
       'Uplink reads the Messages database on your Mac to find texts from the handles you allow, which is why it asks for Full Disk Access. It keeps its own record of each run (what was asked, the reply, how long it took) in a database on your Mac. You can see it in Uplink\'s dashboard.',
-      'Your Claude Code token is stored in your Mac\'s Keychain, and so is your license key.',
+      'Your agent sign-in is stored in your Mac\'s Keychain, and so is your license key. Codex keeps its own credentials, so there is nothing of its for Uplink to hold.',
     ],
   },
   {
