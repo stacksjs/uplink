@@ -5,38 +5,72 @@ on:
     tags:
       - 'v*'
 
+# Read only. This workflow publishes nothing: `buddy uplink:release` on a Mac
+# is the only publisher, because the DMG has to be signed with a Developer ID
+# and notarized by Apple, and no ubuntu runner can do that.
+#
+# It used to run `stacksjs/action-releaser`, which created a release for the
+# same tag and attached nothing. Whichever finished last decided what the
+# release page said, and a tag pushed without the manual step still produced
+# the release GitHub then calls `latest`, so every download 404'd with nothing
+# failing anywhere to say so (#32).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  dmg-attached:
+    name: The release has a DMG
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-        with:
-          # The changelog is generated from commits since the previous tag, so
-          # the full history has to be present.
-          fetch-depth: 0
-
-      - name: Setup Pantry
-        uses: pantry-pm/pantry/packages/action@fa35547da630b14beda5b26a2625490864d5c963 # v0.11.60
-        with:
-          install: 'false'
-
-      - name: Use Cached node_modules
-        uses: actions/cache@v5
-        with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            node-modules-
-
-      - name: Install Dependencies
-        run: bun install
-
-      - name: Create GitHub Release
-        uses: stacksjs/action-releaser@v1.2.9
+      # `gh release create` makes the tag and the release, then uploads about
+      # 35 MB, so this run starts while the upload is still going. Polling is
+      # the point: checking once would race the publisher that is working
+      # correctly.
+      - name: Wait for Uplink.dmg to be attached
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          for attempt in $(seq 1 30); do
+            release=$(gh release view "$TAG" --repo "$REPO" --json isDraft,assets 2>/dev/null) || release=''
+
+            if [ -n "$release" ]; then
+              # A draft never becomes `latest`, so it cannot 404 a download.
+              if [ "$(echo "$release" | jq -r '.isDraft')" = 'true' ]; then
+                echo "$TAG is a draft. Nothing points at it yet, so there is nothing to check."
+                exit 0
+              fi
+              if echo "$release" | jq -e '.assets[] | select(.name == "Uplink.dmg")' >/dev/null; then
+                echo "$TAG has Uplink.dmg. releases/latest/download/Uplink.dmg resolves."
+                exit 0
+              fi
+            fi
+
+            echo "attempt $attempt/30: no Uplink.dmg on $TAG yet, waiting 20s"
+            sleep 20
+          done
+
+          cat <<EOF
+          ::error::$TAG has no Uplink.dmg after 10 minutes.
+
+          Every download link in the project goes through
+          releases/latest/download/Uplink.dmg: the README button and the three
+          on the homepage. A published release without that asset moves
+          'latest' and 404s all of them.
+
+          This usually means the tag was pushed without running the publisher.
+          Only 'buddy uplink:release' on a Mac can attach the DMG, because it
+          signs with a Developer ID and notarizes with Apple.
+
+          Either attach the asset to the existing release:
+
+            gh release upload $TAG storage/framework/desktop-dmg/Uplink.dmg
+
+          or take the tag back so 'latest' stops pointing at it:
+
+            gh release delete $TAG --cleanup-tag
+          EOF
+          exit 1
