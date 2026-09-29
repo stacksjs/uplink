@@ -27,9 +27,23 @@ const KEYCHAIN_SERVICE = 'com.stacksjs.uplink'
 const KEYCHAIN_ACCOUNT = 'license-key'
 const CACHE_PATH = join(DATA_DIR, 'license.json')
 
+/**
+ * Stamped into the cache file, and bumped whenever `LicenseState` changes
+ * shape. A file carrying any other version is refused rather than read.
+ *
+ * Refusing costs one request to the license server, which the launch makes
+ * anyway. Reading an older shape as though it were this one is how a Mac ends
+ * up entitled for two weeks on a field that used to mean something else, with
+ * nothing in the file to say which build wrote it.
+ */
+const STATE_VERSION = 1
+
+export const PLANS = ['monthly', 'yearly', 'lifetime'] as const
+export type Plan = typeof PLANS[number]
+
 export interface LicenseState {
   valid: boolean
-  plan: 'monthly' | 'yearly' | 'lifetime' | null
+  plan: Plan | null
   status: string
   email: string | null
   /** ISO time the paid period ends; null for lifetime. */
@@ -87,7 +101,7 @@ export async function checkLicenseKey(key: string, fetcher: typeof fetch = fetch
       kind: 'answered',
       state: {
         valid: body.valid === true,
-        plan: body.plan ?? null,
+        plan: planOf(body.plan),
         status: String(body.status ?? ''),
         email: body.email ?? null,
         expiresAt: body.expiresAt ?? null,
@@ -160,15 +174,67 @@ export function readLicenseState(path = CACHE_PATH): LicenseState | null {
   if (!existsSync(path))
     return null
   try {
-    const state = JSON.parse(readFileSync(path, 'utf8')) as LicenseState
-    return typeof state.checkedAt === 'number' ? state : null
+    return parseLicenseState(JSON.parse(readFileSync(path, 'utf8')))
   }
   catch {
+    // Not JSON at all.
     return null
   }
 }
 
+/**
+ * The cached answer, or null for anything this build cannot vouch for.
+ *
+ * Null is not a failure worth reporting: the key is in the Keychain, the
+ * launch asks the server, and an online Mac never notices. A Mac that is
+ * offline at the moment it upgrades is asked to connect once, which is the
+ * right thing to ask and the wrong thing to guess.
+ */
+export function parseLicenseState(input: unknown): LicenseState | null {
+  if (!input || typeof input !== 'object')
+    return null
+  const state = input as Record<string, unknown>
+
+  // 0.1.4 wrote no version and the shape has not changed since, so an
+  // unstamped file is this one. Refusing those would have locked out exactly
+  // the Macs this cache exists for, the ones that are not online.
+  const version = state.version === undefined ? STATE_VERSION : state.version
+  if (version !== STATE_VERSION)
+    return null
+
+  // `valid` and `checkedAt` are the two that decide whether Uplink answers at
+  // all, and the rest is what the menubar prints. A file that is wrong about
+  // any of them was not written by this build, so none of it is evidence.
+  if (typeof state.valid !== 'boolean' || typeof state.checkedAt !== 'number' || !Number.isFinite(state.checkedAt))
+    return null
+  if (state.plan !== null && planOf(state.plan) === null)
+    return null
+  if (typeof state.status !== 'string' || typeof state.endsAtPeriodEnd !== 'boolean')
+    return null
+  if (state.email !== null && typeof state.email !== 'string')
+    return null
+  if (state.expiresAt !== null && typeof state.expiresAt !== 'string')
+    return null
+
+  return {
+    valid: state.valid,
+    plan: planOf(state.plan),
+    status: state.status,
+    email: state.email,
+    expiresAt: state.expiresAt,
+    endsAtPeriodEnd: state.endsAtPeriodEnd,
+    checkedAt: state.checkedAt,
+  }
+}
+
+function planOf(value: unknown): Plan | null {
+  return typeof value === 'string' && (PLANS as readonly string[]).includes(value) ? value as Plan : null
+}
+
 export function writeLicenseState(state: LicenseState | null, path = CACHE_PATH): void {
   mkdirSync(join(path, '..'), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 })
+  // The version leads, so the first line of the file says which build's
+  // meaning the rest carries.
+  const body = state === null ? null : { version: STATE_VERSION, ...state }
+  writeFileSync(path, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 })
 }
