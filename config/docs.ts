@@ -4,9 +4,11 @@ import { env } from '@stacksjs/env'
 /**
  * **Documentation Configuration**
  *
- * Your app's documentation site, built with BunPress from `docs/`. There is no
- * `docs/` until you create one: add `docs/index.md` and `buddy dev` serves it
- * at /docs, and `buddy deploy` builds it.
+ * Your app's documentation site, built with BunPress from `docs/`, served at
+ * /docs by `buddy dev`.
+ *
+ * Every page below has to exist in `docs/`, because nothing checks that a nav
+ * or sidebar link resolves.
  */
 
 // APP_URL is often a bare host, which is not a URL on its own.
@@ -18,7 +20,12 @@ const config: BunPressOptions = {
   docsDir: './docs',
   outDir: './dist/docs',
 
-  nav: [],
+  nav: [
+    { text: 'Install', link: '/install' },
+    { text: 'Configuration', link: '/configuration' },
+    { text: 'Security', link: '/security' },
+    { text: 'GitHub', link: 'https://github.com/stacksjs/uplink' },
+  ],
 
   markdown: {
     title: `${env.APP_NAME || 'Uplink'} Documentation`,
@@ -38,6 +45,22 @@ const config: BunPressOptions = {
           text: 'Getting Started',
           items: [
             { text: 'Introduction', link: '/' },
+            { text: 'Install', link: '/install' },
+            { text: 'Permissions', link: '/permissions' },
+          ],
+        },
+        {
+          text: 'Running it',
+          items: [
+            { text: 'Configuration', link: '/configuration' },
+            { text: 'Security', link: '/security' },
+          ],
+        },
+        {
+          text: 'When it goes wrong',
+          items: [
+            { text: 'Troubleshooting', link: '/troubleshooting' },
+            { text: 'Uninstall', link: '/uninstall' },
           ],
         },
       ],

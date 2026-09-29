@@ -145,7 +145,7 @@ Pushing to `main` deploys https://uplink.stacksjs.com once CI passes (`.github/w
 | `./buddy uplink:ask "<prompt>"` | Run one prompt exactly as a text would, without Messages |
 | `./buddy uplink:release` | Build, sign and notarize Uplink.app and publish it to GitHub Releases |
 | `./buddy uplink:watch` | The watcher itself, in the foreground (needs Full Disk Access for your terminal) |
-| `./buddy dev` | The dashboard: setup status, what it is doing, recent texts |
+| `./buddy dev` | Serves the dashboard at https://uplink.localhost/dashboard and the docs at /docs. Both are local only: the dashboard answers 404 in production |
 
 Configuration lives in `.env`; see the `UPLINK_*` block in `.env.example`, which covers both
 engines (`UPLINK_ENGINE`, `UPLINK_CLAUDE_BIN`, `UPLINK_CODEX_BIN` and the rest). The service picks
@@ -159,11 +159,15 @@ up edits by itself.
   `codex-engine.ts`, `engines.ts`), replies (`sender.ts`, `format.ts`), the launchd service and app
   bundle (`service.ts`, `launcher.ts`) and setup checks (`doctor.ts`).
 - `app/Commands/Uplink.ts`: the `buddy uplink:*` commands.
-- `app/Models/`: `Conversation` (a thread, its agent session and which agent) and `Run` (one text,
-  one run).
-- `resources/views/index.stx`: the dashboard.
-- `tests/unit/uplink/`: against a real chat.db-shaped SQLite file and stub CLIs.
+- `app/Models/`: `Conversation` (a thread, its agent session and which agent), `Run` (one text, one
+  run) and `License` (a key, its plan and its Stripe ids).
+- `app/Billing/`: Stripe Checkout, licences and the plans they come from.
+- `resources/views/index.stx`: the public page at https://uplink.stacksjs.com.
+- `resources/views/dashboard.stx`: the dashboard, local only. It calls `notFound()`, so it answers
+  404 wherever the site is deployed.
+- `docs/`: the documentation, served at /docs by `buddy dev`.
+- `tests/unit/`: against a real chat.db-shaped SQLite file and stub CLIs.
 
 ```bash
-./pantry/.bin/bun test tests/unit/uplink
+./buddy test
 ```
