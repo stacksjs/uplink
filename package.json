@@ -23,6 +23,7 @@
     "deploy": "./buddy deploy",
     "lint": "./buddy lint",
     "lint:fix": "./buddy lint:fix",
+    "release:check": "bun .github/scripts/check-release-version.ts",
     "format": "./buddy format",
     "format:check": "./buddy format:check",
     "serve": "./buddy serve",

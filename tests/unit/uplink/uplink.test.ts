@@ -380,5 +380,63 @@ describe('Uplink', () => {
     await h.uplink.tick()
     expect(h.sender.texts().at(-1)).toContain('claude / codex')
   })
+
+  /**
+   * #16. The cutoff is right: a Mac waking up must not replay a day of texts.
+   * Saying nothing was not, because over a satellite link the send itself may
+   * have taken minutes and silence is the worst available answer.
+   */
+  it('tells you a text arrived while the Mac was asleep, and does not run it', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'deploy the thing', fromMe: true, at: Date.now() - 2 * 3_600_000 })
+    await h.uplink.tick()
+
+    expect(h.sender.texts()).toHaveLength(1)
+    expect(h.sender.texts()[0]).toContain('while this Mac was asleep')
+    expect(h.sender.texts()[0]).toContain('Send it again')
+    // Never run automatically: that is what the cutoff is for.
+    expect(h.engine.runs).toHaveLength(0)
+    expect(h.store.runs.size).toBe(0)
+  })
+
+  it('answers a backlog once, not once per text', async () => {
+    const h = await harness()
+    const asleep = Date.now() - 2 * 3_600_000
+    for (let i = 0; i < 8; i++)
+      h.fake.add({ chat: ME, text: `task ${i}`, fromMe: true, at: asleep + i * 1000 })
+    await h.uplink.tick()
+
+    expect(h.sender.texts()).toHaveLength(1)
+    expect(h.sender.texts()[0]).toContain('8 texts')
+    expect(h.engine.runs).toHaveLength(0)
+  })
+
+  it('says nothing about a control word that was skipped', async () => {
+    const h = await harness()
+    // Answered live or not at all: reporting an unanswered midnight "status"
+    // is noise, not information.
+    h.fake.add({ chat: ME, text: 'status', fromMe: true, at: Date.now() - 2 * 3_600_000 })
+    h.fake.add({ chat: ME, text: 'stop', fromMe: true, at: Date.now() - 2 * 3_600_000 })
+    await h.uplink.tick()
+    expect(h.sender.texts()).toEqual([])
+  })
+
+  it('says nothing about a text from last week', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'a task', fromMe: true, at: Date.now() - 7 * 24 * 3_600_000 })
+    await h.uplink.tick()
+    expect(h.sender.texts()).toEqual([])
+  })
+
+  it('runs the fresh text in the same wake and explains only the old one', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'old task', fromMe: true, at: Date.now() - 2 * 3_600_000 })
+    h.fake.add({ chat: ME, text: 'new task', fromMe: true })
+    await h.uplink.tick()
+
+    expect(h.engine.runs).toHaveLength(1)
+    expect(h.engine.runs[0].request.prompt).toContain('new task')
+    expect(h.sender.texts().filter(t => t.includes('while this Mac was asleep'))).toHaveLength(1)
+  })
 })
 
