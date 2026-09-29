@@ -51,7 +51,14 @@ function craftRuntime(): string {
   return found
 }
 
-const agent = await startDesktopAgent({ version: pkg.version })
+// Anything thrown in here happens before the menubar exists, and launchd's
+// KeepAlive restarts a non-zero exit, so the loop would be silent: the plist
+// sets no StandardErrorPath, and the rebinding above only catches what goes
+// through `console`. Exit the same way, having said why first.
+const agent = await startDesktopAgent({ version: pkg.version }).catch((error: unknown) => {
+  console.error(`[uplink] could not start: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+  return process.exit(1)
+})
 console.log(`[uplink] ${pkg.version} serving the menubar on 127.0.0.1:${agent.port}`)
 
 // --tray-popover: Craft hangs the page under the status item on the popover

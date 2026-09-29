@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadConfig } from '../../../app/Uplink/config'
 import { MessagesDb } from '../../../app/Uplink/messages-db'
-import { cleanToken, readSettings, settingsEnv, tokenLooksValid, writeSettings } from '../../../app/Uplink/settings'
+import { cleanToken, coerceSettings, DEFAULT_SETTINGS, readSettings, settingsEnv, tokenLooksValid, writeSettings } from '../../../app/Uplink/settings'
 import { migrate, RUN_COLUMNS, schemaVersion, SqliteStore, TABLES } from '../../../app/Uplink/sqlite-store'
 import { Uplink } from '../../../app/Uplink/uplink'
 import { FakeChatDb, FakeEngine, FakeSender, ME, settle } from './fixtures'
@@ -307,6 +307,67 @@ describe('settings', () => {
     const path = join(tempDir(), 'settings.json')
     writeSettings({ ...settings, engine: 'gemini' as never }, path)
     expect(readSettings(path).engine).toBe('claude')
+  })
+
+  /**
+   * `readSettings` runs at the desktop agent's first statements, before the
+   * menubar exists, and launchd restarts a non-zero exit. So a file it cannot
+   * read is not an error it can report: it is an invisible restart loop. Only
+   * `engine` used to be checked, and an `allowed` that was not an array reached
+   * `settingsEnv` and threw on every launch.
+   */
+  it('falls back per field rather than throwing, whatever the file holds', () => {
+    const path = join(tempDir(), 'settings.json')
+    const broken: Array<[string, unknown]> = [
+      ['allowed', null],
+      ['allowed', 'me@example.com'],
+      ['engine', 'gemini'],
+      ['model', 42],
+      ['workdir', null],
+      ['workdir', ''],
+      ['openAtLogin', 'yes'],
+      ['paused', 1],
+    ]
+    for (const [key, value] of broken) {
+      Bun.write(path, JSON.stringify({ ...DEFAULT_SETTINGS, [key]: value }))
+      const settings = readSettings(path)
+      expect(settings[key as keyof typeof settings]).toEqual(DEFAULT_SETTINGS[key as keyof typeof DEFAULT_SETTINGS])
+      // The throw that used to take the app down, on the field that used to do it.
+      expect(() => settingsEnv(settings, {})).not.toThrow()
+    }
+  })
+
+  it('survives a file that is not an object at all', () => {
+    const path = join(tempDir(), 'settings.json')
+    for (const body of ['null', '[]', '"nope"', '5', '{ not json']) {
+      Bun.write(path, body)
+      expect(readSettings(path)).toEqual(DEFAULT_SETTINGS)
+    }
+  })
+
+  it('reads back exactly what it wrote', () => {
+    const path = join(tempDir(), 'settings.json')
+    const settings = { allowed: ['+15550001111'], engine: 'codex' as const, model: 'gpt-5-codex', workdir: '/tmp', openAtLogin: false, paused: true }
+    writeSettings(settings, path)
+    expect(readSettings(path)).toEqual(settings)
+    // And the default file too, whose `model` is null.
+    writeSettings(DEFAULT_SETTINGS, path)
+    expect(readSettings(path)).toEqual(DEFAULT_SETTINGS)
+  })
+
+  /**
+   * The popover sends the fields it changed. The same checks apply, but an
+   * absent or unusable one keeps what is set rather than reverting to a
+   * default, which is what makes it a partial update.
+   */
+  it('keeps the current value for a field the popover did not send', () => {
+    const current = { ...DEFAULT_SETTINGS, allowed: ['+15550001111'], paused: true }
+    expect(coerceSettings({ paused: false }, current)).toEqual({ ...current, paused: false })
+    expect(coerceSettings({ paused: 'no' }, current)).toEqual(current)
+    expect(coerceSettings({}, current)).toEqual(current)
+    expect(coerceSettings(undefined, current)).toEqual(current)
+    // Handles are normalized the way the popover's own path normalized them.
+    expect(coerceSettings({ allowed: [' me@example.com ', '', 5] }, current).allowed).toEqual(['me@example.com', '5'])
   })
 
   it('cleans a token pasted across a line wrap', () => {

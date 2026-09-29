@@ -8,12 +8,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { loadConfig } from './config'
-import { isEngineId } from './engine'
 import { allEngines, selectedEngine } from './engines'
 import { formatDuration, truncate } from './format'
 import { MessagesAccessError, MessagesDb } from './messages-db'
 import { AppleScriptSender } from './sender'
-import { cleanToken, DATA_DIR, DATABASE_PATH, readSettings, readToken, settingsEnv, tokenLooksValid, writeSettings, writeToken } from './settings'
+import { cleanToken, coerceSettings, DATA_DIR, DATABASE_PATH, readSettings, readToken, settingsEnv, tokenLooksValid, writeSettings, writeToken } from './settings'
 import { checkLicenseKey, describeLicense, isLicensed, normalizeKey, portalUrl, PRICING_URL, readLicenseKey, readLicenseState, RECHECK_MS, writeLicenseKey, writeLicenseState } from './license'
 import { SignIn } from './sign-in'
 import { SqliteStore } from './sqlite-store'
@@ -614,16 +613,20 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
           return json(engineResult())
 
         case '/api/settings': {
-          if (Array.isArray(body.allowed))
-            settings.allowed = body.allowed.map(String).map((s: string) => s.trim()).filter(Boolean)
-          if (typeof body.engine === 'string' && isEngineId(body.engine))
-            settings.engine = body.engine
-          if (typeof body.paused === 'boolean')
-            settings.paused = body.paused
-          if (typeof body.openAtLogin === 'boolean') {
-            settings.openAtLogin = body.openAtLogin
-            setOpenAtLogin(body.openAtLogin)
-          }
+          // The four fields the popover can send, checked by the same tests the
+          // read path uses. Anything absent or unusable keeps what is set now,
+          // so this stays a partial update.
+          settings = coerceSettings({
+            allowed: body.allowed,
+            engine: body.engine,
+            paused: body.paused,
+            openAtLogin: body.openAtLogin,
+          }, settings)
+          // Rewritten whenever the popover sent the field, not only when the
+          // value changed: someone toggling it back and forth is how a login
+          // item left pointing at an old install gets repaired.
+          if (typeof body.openAtLogin === 'boolean')
+            setOpenAtLogin(settings.openAtLogin)
           writeSettings(settings)
           settings = readSettings()
           config = loadConfig(settingsEnv(settings))
