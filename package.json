@@ -87,12 +87,12 @@
     "docs:agent-counts:check": "./buddy docs:agent-counts:check"
   },
   "dependencies": {
-    "@stacksjs/actions": "^0.75.30",
-    "@stacksjs/env": "^0.75.30",
-    "@stacksjs/path": "^0.75.30",
+    "@stacksjs/actions": "^0.75.35",
+    "@stacksjs/env": "^0.75.35",
+    "@stacksjs/path": "^0.75.35",
     "bunfig": "^0.15.19",
     "pickier": "^0.1.65",
-    "stacks": "^0.75.30",
+    "stacks": "^0.75.35",
     "stripe": "22.6.2"
   },
   "workspaces": [

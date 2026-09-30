@@ -15,7 +15,7 @@ const isSubjectEligible: OAuthSubjectEligibility = async (subject) => {
 
 export default new Action({
   name: 'OAuthTokenAction',
-  description: 'Exchange OAuth authorization codes and refresh tokens',
+  description: 'Exchange OAuth authorization codes, refresh tokens, and machine credentials',
   method: 'POST',
   // OAuth clients authenticate with PKCE or HTTP Basic and cannot obtain the
   // browser CSRF cookie. The protocol boundary validates its own credentials.
@@ -26,10 +26,12 @@ export default new Action({
     if (!provider)
       return response.notFound('OAuth provider is not enabled')
 
+    const eligible = provider.subjectEligibility ?? isSubjectEligible
+
     return handleOAuthTokenRequest(provider, {
       body: (await request.rawBody?.()) ?? '',
       contentType: request.headers.get('content-type'),
       authorization: request.headers.get('authorization'),
-    }, { isSubjectEligible })
+    }, { isSubjectEligible: eligible })
   },
 })

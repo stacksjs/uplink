@@ -161,8 +161,12 @@ routes: minting and revoking both carry semantics a generic route does not.
 The authorization server is opt-in through `config/auth.ts` under
 `oauthProvider`. It is separate from social sign-in, where Stacks is the OAuth
 client. The provider profile is Authorization Code with S256 PKCE and rotating
-refresh tokens. It does not support implicit, password, or client-credentials
-grants. It also does not implement token introspection or OpenID Connect.
+refresh tokens. Confidential client credentials are opt-in through
+`oauthProvider.clientCredentials` and mint access-only tokens without refresh
+tokens. Protected resource-server introspection is separately opt-in through
+`oauthProvider.introspection`; it authenticates a confidential client and
+requires that client to share a configured resource audience with the token.
+It does not support implicit or password grants or OpenID Connect.
 
 When enabled, the default auth route bundle registers:
 
@@ -178,6 +182,11 @@ Resource audiences are absolute URIs and redirect URIs use exact matching.
 The consent view is `auth/oauth/consent` by default and can be overridden with
 `oauthProvider.consent.view`. Use `oauthProvider.consent.resolveWorkspace` when
 the application must bind consent to current server-owned workspace authority.
+Use `oauthProvider.subjectEligibility` when account status is represented by
+application data that is not simply the presence of a user row. The callback
+is rechecked before consent approval, delegated code exchange and refresh, and
+by introspection; returning false revokes the affected grant and reports the
+token inactive.
 
 Provider actions return 404 while `oauthProvider.enabled` is false. The token
 and revocation endpoints use protocol credentials and intentionally skip
@@ -295,7 +304,7 @@ interface RbacStore { findRoleByName, createRole, deleteRole, getAllRoles, findP
 - `SessionAuth.check(sessionId): boolean`
 - `SessionAuth.refresh(sessionId, ttlMs?): boolean`, rejects non-positive or non-finite TTLs without changing the session
 
-Internal: in-memory Map with 10k session limit, 5-minute eviction interval, timing-safe password comparison with dummy bcrypt hash.
+Internal: database-backed `sessions` rows with expiry, optional IP/User-Agent fingerprint checks, transactional logout and refresh, and timing-safe password comparison with a dummy bcrypt hash. Sessions survive process restarts and are shared by workers through the configured database.
 
 ## Email Verification (email-verification.ts)
 
@@ -395,7 +404,6 @@ await authUser.authorize('edit-post', post)  // throws if denied
     withRefreshToken: false, // fixed browser lifetime, no unused refresh token
     logoutRedirect: '/login?logged_out=1', // local path for HTML logout only
   },
-  tokenRotation: 24,       // hours
   defaultAbilities: ['*'],
   defaultTokenName: 'auth-token',
   passwordReset: { expire: 60, throttle: 60 }
@@ -505,12 +513,12 @@ traits: {
 
 - Auth depends on `@stacksjs/ts-auth` for TOTP and passkey functions
 - Password hashing defaults to bcrypt with 12 rounds (config/hashing.ts)
-- Rate limiter uses in-memory Map, resets on server restart — not shared across workers
-- Session auth also uses in-memory Map with 10k limit — for SPA cookie auth
-- Token format is `tokenId|plainText` — the `|` separates the encrypted ID from the plain token
-- The `parseToken()` helper splits on `|` to extract both parts
+- Rate limiting uses a process-local memory store by default. Production deployments with multiple workers should configure the atomic Redis store or provide a custom atomic store.
+- Session auth is database-backed through the `sessions` table, so it survives server restarts and is shared across workers.
+- New personal and delegated access tokens are opaque 40-byte hex bearers hashed at rest. Legacy `jwt:encryptedId` bearers remain readable during migration.
+- Token validation hashes the bearer directly. Do not parse or expose token contents, and never log plaintext bearer values.
 - Bearer tokens come from the `Authorization: Bearer <token>` header
-- `Auth.user()` internally calls `getBearerToken()` → `parseToken()` → `getTokenFromId()` → validates hash
+- `Auth.user()` internally calls `getBearerToken()` and resolves the bearer through a hashed token lookup
 - RBAC has an internal cache (`userRoles`, `userPermissions`, `rolePermissions`) — call `Rbac.flushCache()` after direct DB changes
 - `syncRoles()` and `syncPermissions()` are guard-scoped replacements: they preserve assignments belonging to other guards
 - Gate `before` callbacks can short-circuit — return `true` to allow, `null` to continue checking

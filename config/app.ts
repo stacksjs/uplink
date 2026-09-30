@@ -29,4 +29,13 @@ export default {
   locale: 'en',
   fallbackLocale: 'en',
   cipher: 'aes-256-cbc',
+
+  // /sitemap.xml and /robots.txt are generated from resources/views. Pages
+  // that set `noindex` (thanks, checkout, license) stay out of the sitemap on
+  // their own; robots only has to keep crawlers off /checkout/, where every
+  // request opens a Stripe Checkout session. /api/ is disallowed by default.
+  seo: {
+    origin: 'https://uplink.stacksjs.com',
+    robots: { disallow: ['/checkout/', '/thanks'] },
+  },
 } satisfies AppConfig
