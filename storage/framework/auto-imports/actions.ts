@@ -8,6 +8,7 @@ export const actions = {
   'Actions/Billing/OpenPortalAction': '../../../app/Actions/Billing/OpenPortalAction.ts',
   'Actions/Billing/StripeWebhookAction': '../../../app/Actions/Billing/StripeWebhookAction.ts',
   'Actions/License/CheckLicenseAction': '../../../app/Actions/License/CheckLicenseAction.ts',
+  'Actions/License/ResendLicenseAction': '../../../app/Actions/License/ResendLicenseAction.ts',
   'Actions/NotifyUser': '../../../app/Actions/NotifyUser.ts',
   'Actions/SendWelcomeEmail': '../../../app/Actions/SendWelcomeEmail.ts',
   'Actions/AI/AskAction': '../defaults/app/Actions/AI/AskAction.ts',

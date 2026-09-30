@@ -44,6 +44,7 @@ const faqs = [
   { q: 'Is anything charged per text?', a: 'No. Uplink costs the price above. The answers run on your own Claude or ChatGPT plan.' },
   { q: 'Who handles the payment?', a: 'Stripe. You pay on Stripe\'s own checkout page, so your card never reaches Uplink or this site.' },
   { q: 'Can I cancel?', a: 'Yes. Uplink\'s menubar has Manage Subscription, which opens Stripe\'s billing page: cancel there and you keep what you paid for until the period ends.' },
+  { q: 'I lost my license key. What now?', a: 'Ask for it again at uplink.stacksjs.com/license, linked at the bottom of every page. It goes to the email you bought with. A Mac already running Uplink keeps its key in the Keychain and does not need it again.' },
   { q: 'Which one should I pick?', a: 'Monthly to try it on one trip. Yearly if you text your Mac through the year. Lifetime if you would rather pay once and be done.' },
   { q: 'What else do I need?', a: 'A Mac on macOS 13 or later, an iPhone with iMessage, and Claude Code or Codex signed in on the Mac. Uplink walks you through the rest.' },
 ]

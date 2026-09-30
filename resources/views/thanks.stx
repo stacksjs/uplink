@@ -46,7 +46,7 @@ const downloadUrl = release.url
         <section class="mt-10 p-6 border rounded-2xl u-line u-raised u-rise" style="--i: 3" aria-labelledby="license-title">
           <h2 id="license-title" class="text-sm font-medium u-muted">Your license key</h2>
           <p class="mt-2 font-medium text-2xl tracking-wide select-all u-mono">{{ licenseKey }}</p>
-          <p class="mt-2 text-sm u-muted">Keep it: it is how Uplink knows this Mac is paid for. Bookmark this page to find it again.</p>
+          <p class="mt-2 text-sm u-muted">Keep it: it is how Uplink knows this Mac is paid for. It is in your email too, and if you lose both, <a href="/license" class="underline underline-offset-4 hover:opacity-80">have it sent again</a>.</p>
           <div class="flex flex-wrap gap-3 mt-5">
             <a href="{{ activateUrl }}" class="u-btn u-btn-primary">Activate Uplink</a>
             <a href="{{ downloadUrl }}" class="u-btn u-btn-ghost">
@@ -59,6 +59,7 @@ const downloadUrl = release.url
       @else
         <h1 class="mt-6 font-semibold text-4xl tracking-tight u-rise" style="--i: 1">Thanks for choosing Uplink.</h1>
         <p class="mt-4 leading-relaxed text-lg u-muted u-rise" style="--i: 2">Your receipt comes from Stripe by email once the payment clears.</p>
+        <p class="mt-3 leading-relaxed u-muted u-rise" style="--i: 2">Bought before and lost your key? <a href="/license" class="underline underline-offset-4 hover:opacity-80">Have it sent again</a>.</p>
       @endif
 
       <ol class="grid gap-6 mt-12 u-rise" style="--i: 3">

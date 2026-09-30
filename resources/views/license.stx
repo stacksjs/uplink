@@ -1,0 +1,93 @@
+<script server>
+/**
+ * /license - "email me my license key again", for a buyer who lost the email.
+ *
+ * A plain form, no client script: it posts to /api/license/resend, which
+ * sends the keys bought with the address to that address and redirects back
+ * here with one of three answers. None of them says whether the address
+ * bought anything, and neither may this page (app/Billing/license-resend.ts).
+ *
+ * The form carries the CSRF token the server minted for this render, the same
+ * one it sets as the page's cookie, so the page must never be cached: a cached
+ * copy would hand one visitor's token to the next.
+ */
+const path = '/license'
+const title = 'Get your license key - Uplink'
+const description = 'Lost the email with your Uplink license key? Have it sent again to the address you bought with.'
+const noindex = true
+
+setResponseHeader('Cache-Control', 'no-store')
+
+const params = typeof query !== 'undefined' ? query : {}
+const jar = typeof cookies !== 'undefined' ? cookies : {}
+const csrfToken = jar['X-CSRF-Token'] ?? ''
+const sent = params.sent === '1'
+const errors: Record<string, string> = {
+  invalid: 'That does not look like an email address. Check it and try again.',
+  busy: 'That is a lot of requests from here. Try again in an hour.',
+}
+const error = errors[params.error ?? ''] ?? ''
+</script>
+
+@nolayout
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    @include('site-head')
+  </head>
+  <body class="antialiased uplink">
+    @include('site-nav')
+
+    <main class="mx-auto px-4 pb-24 pt-14 sm:px-6 lg:pt-20 max-w-2xl">
+      <p class="text-xs tracking-[0.18em] uppercase u-accent u-mono u-rise" style="--i: 0">License</p>
+      <h1 class="mt-4 font-semibold leading-[1.05] text-4xl tracking-tighter md:text-5xl u-rise" style="--i: 1">Lost your license key?</h1>
+      <p class="mt-4 max-w-[52ch] leading-relaxed text-lg u-muted u-rise" style="--i: 2">Type the email you bought Uplink with. Every key bought with it goes to that address, and only there.</p>
+
+      <section class="mt-10 p-6 border rounded-2xl sm:p-8 u-line u-raised u-rise" style="--i: 3" aria-labelledby="resend-title">
+        @if(sent)
+          <div role="status">
+            <span class="grid place-items-center size-10 rounded-full u-wash" aria-hidden="true">
+              <span class="size-5 i-hugeicons-mail-send-01 u-accent"></span>
+            </span>
+            <h2 id="resend-title" class="mt-5 font-semibold text-xl tracking-tight">If that address bought Uplink, the key is on its way.</h2>
+            <p class="mt-2 leading-relaxed u-muted">It comes from uplink@stacksjs.com and can take a few minutes. If it has not arrived, look in spam, or try the other address you might have used.</p>
+            <a href="/license" class="mt-6 u-btn u-btn-ghost">Try another address</a>
+          </div>
+        @else
+          <h2 id="resend-title" class="font-semibold text-xl tracking-tight">Email me my key</h2>
+          <form method="post" action="/api/license/resend" class="mt-5">
+            <input type="hidden" name="_token" value="{{ csrfToken }}">
+            <label for="resend-email" class="block text-sm font-medium">Email you bought with</label>
+            <div class="flex flex-col gap-3 mt-2 sm:flex-row">
+              @if(error)
+                <input id="resend-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="254" required placeholder="you@example.com" class="flex-1 min-w-0 u-input" aria-invalid="true" aria-describedby="resend-error">
+              @else
+                <input id="resend-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="254" required placeholder="you@example.com" class="flex-1 min-w-0 u-input">
+              @endif
+              <button type="submit" class="u-btn u-btn-primary">Email my key</button>
+            </div>
+            @if(error)
+              <p id="resend-error" class="flex gap-2 items-start mt-3 text-sm u-error" role="alert">
+                <span class="shrink-0 mt-0.5 size-4 i-hugeicons-alert-circle" aria-hidden="true"></span>
+                {{ error }}
+              </p>
+            @endif
+          </form>
+        @endif
+      </section>
+
+      <div class="grid gap-6 mt-12 sm:grid-cols-2 u-rise" style="--i: 4">
+        <div>
+          <h2 class="font-semibold">Already activated?</h2>
+          <p class="mt-1 text-sm leading-relaxed u-muted">Uplink keeps your key in your Mac's Keychain, so a Mac that is running it does not need the key again.</p>
+        </div>
+        <div>
+          <h2 class="font-semibold">Still stuck?</h2>
+          <p class="mt-1 text-sm leading-relaxed u-muted">Write to <a href="mailto:uplink@stacksjs.com" class="underline underline-offset-4 hover:opacity-80">uplink@stacksjs.com</a> from any address and say which one you bought with.</p>
+        </div>
+      </div>
+    </main>
+
+    @include('site-footer')
+  </body>
+</html>

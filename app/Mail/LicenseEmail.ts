@@ -1,18 +1,25 @@
 import type { LicenseRecord } from '../Billing/licenses'
 import { config } from '@stacksjs/config'
+import type { TemplateVariables } from '@stacksjs/email'
 import { mail, template } from '@stacksjs/email'
 import { formatCents, planById, SIX_MONTHS_FREE } from '../Billing/plans'
 
 /**
- * The email that carries a new license key: sent once, when a purchase
- * becomes a license, from uplink@stacksjs.com. The key is also on the
- * thank-you page, which is where the Activate button in the email goes.
+ * The email that carries license keys, from uplink@stacksjs.com: sent once
+ * when a purchase becomes a license, and again whenever the buyer asks /license
+ * for their keys (the resend variant of the same template). The key is also on
+ * the thank-you page, which is where the Activate button in the email goes.
  */
 
 export interface LicenseEmail {
   to: string
   subject: string
-  variables: Record<string, string>
+  variables: TemplateVariables
+}
+
+/** The thank-you page for the checkout that made a license: it shows the key and opens Uplink. */
+export function licensePageUrl(license: LicenseRecord, origin = 'https://uplink.stacksjs.com'): string {
+  return `${origin}/thanks?session_id=${encodeURIComponent(license.stripeCheckoutSessionId)}`
 }
 
 /** What renewal means for this license, in one sentence. */
@@ -46,8 +53,44 @@ export function licenseEmail(license: LicenseRecord, activateUrl: string, freeMo
   }
 }
 
+/**
+ * The keys of an address again, in one email, for the licenses `activeFor`
+ * found. It goes to the address on the license records and nowhere else:
+ * there is no parameter for a recipient, so no caller can add one. Null when
+ * there is nothing to send, which the caller must not reveal.
+ */
+export function licenseResendEmail(licenses: LicenseRecord[], origin?: string): LicenseEmail | null {
+  const to = licenses.find(license => license.email)?.email
+  if (!to)
+    return null
+  const mine = licenses.filter(license => license.email?.toLowerCase() === to.toLowerCase())
+  const subject = mine.length > 1 ? 'Your Uplink license keys' : 'Your Uplink license key'
+  // Newest last in the table, so the Activate button opens the latest one.
+  const newest = mine[mine.length - 1]!
+  return {
+    to,
+    subject,
+    variables: {
+      variant: 'resend',
+      planName: planById(newest.plan)?.name ?? 'Uplink',
+      licenseKey: newest.key,
+      keys: mine.map(license => ({ planName: planById(license.plan)?.name ?? 'Uplink', key: license.key })),
+      activateUrl: licensePageUrl(newest, origin),
+      subject,
+    },
+  }
+}
+
 export async function sendLicenseEmail(license: LicenseRecord, activateUrl: string, freeMonths: boolean): Promise<void> {
-  const email = licenseEmail(license, activateUrl, freeMonths)
+  await deliver(licenseEmail(license, activateUrl, freeMonths))
+}
+
+export async function sendLicenseResendEmail(licenses: LicenseRecord[]): Promise<void> {
+  const { siteOrigin } = await import('../Billing/checkout')
+  await deliver(licenseResendEmail(licenses, siteOrigin()))
+}
+
+async function deliver(email: LicenseEmail | null): Promise<void> {
   if (!email)
     return
   const { html, text } = await template('license', { variables: email.variables })

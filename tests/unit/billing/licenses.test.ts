@@ -7,6 +7,7 @@ function memoryStore(): LicenseStore & { rows: LicenseRecord[] } {
   return {
     rows,
     byKey: async key => rows.find(r => r.key === key) ?? null,
+    byEmail: async email => rows.filter(r => r.email?.toLowerCase() === email),
     bySession: async id => rows.find(r => r.stripeCheckoutSessionId === id) ?? null,
     create: async (license) => { rows.push({ ...license }) },
     update: async (key, patch) => { Object.assign(rows.find(r => r.key === key)!, patch) },

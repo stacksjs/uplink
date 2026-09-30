@@ -5,7 +5,7 @@
  * Written from what the code does, not from a template: the Mac app's only
  * request to us is the license check (app/Uplink/license.ts sends the key and
  * nothing else), the site loads no analytics, and the one cookie is the CSRF
- * token checkout sets. Change this page when any of that changes.
+ * token the pages set. /license looks an address up and stores nothing. Change this page when any of that changes.
  */
 const path = '/privacy'
 const title = 'Privacy - Uplink'
@@ -42,13 +42,14 @@ const sections = [
     heading: 'When you buy',
     paragraphs: [
       'You pay on Stripe\'s own checkout page, so your card never reaches us. Stripe tells us your email, the plan, and its ids for your customer record and subscription. We keep those with your license key so we can email you the key, answer the license check and open your billing page. Stripe handles your payment under its own privacy policy.',
-      'We email you once, with your key, from uplink@stacksjs.com. We do not send newsletters or share your email with anyone.',
+      'We email you your key once, from uplink@stacksjs.com, and again whenever someone asks for it on the license page. We do not send newsletters or share your email with anyone.',
     ],
   },
   {
     heading: 'This website',
     paragraphs: [
-      'The site loads no analytics and no tracking scripts. Checkout sets one cookie, a security token that stops other sites submitting forms as you. The server keeps ordinary request logs.',
+      'The site loads no analytics and no tracking scripts. It sets one cookie, a security token that stops other sites submitting forms as you. The server keeps ordinary request logs.',
+      'If you ask for your license key again, the address you type is used to look up licenses bought with it, and the keys go only to that address. It is not saved. To limit repeated requests the server remembers it, and your IP address, in memory for up to an hour.',
     ],
   },
   {

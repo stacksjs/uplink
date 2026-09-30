@@ -1,30 +1,61 @@
 <script server>
-// Sent once, when a purchase becomes a license (app/Billing/licenses.ts).
+// The email that carries license keys (app/Mail/LicenseEmail.ts), in two
+// variants of one design:
+//   - the purchase email, sent once when a purchase becomes a license
+//     (app/Billing/licenses.ts): one key, what renewal means.
+//   - `variant: 'resend'`, sent when someone asks /license for the keys of an
+//     address: every key still good for it, and no word on any other.
 // Built from the Stacks email components (<EmailLayout>, <EmailCode>, ...), in
 // Uplink's colours: amber accent, dark ink.
 //
 // The button goes to the thank-you page over https, which holds the
 // uplink://activate button: mail clients drop links with a custom scheme.
+const resend = props.variant === 'resend'
 const planName = props.planName || 'Uplink'
 const licenseKey = props.licenseKey || ''
+// One entry per key. The purchase email passes a single key, not a list.
+const keys: Array<{ planName: string, key: string }> = Array.isArray(props.keys) && props.keys.length
+  ? props.keys
+  : [{ planName, key: licenseKey }]
+const several = keys.length > 1
 const activateUrl = props.activateUrl || 'https://uplink.stacksjs.com/pricing'
 const downloadUrl = props.downloadUrl || 'https://github.com/stacksjs/uplink/releases/latest/download/Uplink.dmg'
+const recoverUrl = 'https://uplink.stacksjs.com/license'
 const renewal = props.renewal || ''
 const subject = props.subject || 'Your Uplink license key'
+
+const heading = resend
+  ? (several ? 'Here are your Uplink keys again.' : 'Here is your Uplink key again.')
+  : `You have Uplink ${planName}.`
+const preheader = several
+  ? `Your ${keys.length} Uplink license keys, as asked.`
+  : `Your key is ${keys[0]!.key}. Uplink asks for it once.`
+const footer = resend
+  ? 'You are getting this because someone asked for the Uplink keys bought with this address. They are only ever sent here.'
+  : 'You are getting this because you bought Uplink. Keep it: it is how you find your key again.'
 </script>
 
 <EmailLayout
   title="{{ subject }}"
-  preheader="Your key is {{ licenseKey }}. Uplink asks for it once."
+  preheader="{{ preheader }}"
   brand="Uplink"
   brandUrl="https://uplink.stacksjs.com"
   accent="#f59e0b"
-  footer="You are getting this because you bought Uplink. Keep it: it is how you find your key again."
+  footer="{{ footer }}"
 >
-  <EmailText size="heading">You have Uplink {{ planName }}.</EmailText>
-  <EmailText>Here is your license key. Uplink asks for it once, in its first setup step, and keeps it in your Keychain.</EmailText>
+  <EmailText size="heading">{{ heading }}</EmailText>
+  @if(resend)
+    <EmailText>Someone asked uplink.stacksjs.com to send the license {{ several ? 'keys' : 'key' }} bought with this address. If that was not you, you can ignore this email. Nobody else can see {{ several ? 'them' : 'it' }}.</EmailText>
+  @else
+    <EmailText>Here is your license key. Uplink asks for it once, in its first setup step, and keeps it in your Keychain.</EmailText>
+  @endif
 
-  <EmailCode>{{ licenseKey }}</EmailCode>
+  @foreach(keys as entry)
+    @if(several)
+      <EmailText size="sm" spacing="8px">Uplink {{ entry.planName }}</EmailText>
+    @endif
+    <EmailCode>{{ entry.key }}</EmailCode>
+  @endforeach
 
   <EmailButton href="{{ activateUrl }}" bg="#f59e0b" color="#18181b">Activate Uplink</EmailButton>
 
@@ -35,5 +66,6 @@ const subject = props.subject || 'Your Uplink license key'
   <EmailDivider />
 
   <EmailText size="sm">Not installed yet? <a href="{{ downloadUrl }}" style="color:#b45309;text-decoration:underline;">Download Uplink for Mac</a>, drag it to Applications and open it. It walks you through the rest.</EmailText>
-  <EmailText size="sm" spacing="0">To cancel, change your card or get an invoice, choose Manage in Uplink's menubar.</EmailText>
+  <EmailText size="sm">To cancel, change your card or get an invoice, choose Manage in Uplink's menubar.</EmailText>
+  <EmailText size="sm" spacing="0">Lost your key? <a href="{{ recoverUrl }}" style="color:#b45309;text-decoration:underline;">Have it sent again</a> to the address you bought with.</EmailText>
 </EmailLayout>

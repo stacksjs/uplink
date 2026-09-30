@@ -29,6 +29,12 @@ export interface LicenseRecord {
 
 export interface LicenseStore {
   byKey: (key: string) => Promise<LicenseRecord | null>
+  /**
+   * Every license bought with an address, given lower-cased. A store may hand
+   * back more than that (a case-insensitive LIKE does); `activeFor` keeps only
+   * exact matches, so over-matching is safe and under-matching is not.
+   */
+  byEmail: (email: string) => Promise<LicenseRecord[]>
   bySession: (sessionId: string) => Promise<LicenseRecord | null>
   create: (license: LicenseRecord) => Promise<void>
   update: (key: string, patch: Partial<LicenseRecord>) => Promise<void>
@@ -86,6 +92,21 @@ export function normalizeLicenseKey(input: unknown): string | null {
   if (!/^[A-HJ-NP-Z2-9]{16}$/.test(compact))
     return null
   return `UPLK-${compact.match(/.{4}/g)!.join('-')}`
+}
+
+/**
+ * An address as typed, trimmed and lower-cased, or null when it cannot be
+ * one. Deliberately loose (a real check is whether mail arrives), except that
+ * it refuses `%`, which no buyer's address has and which a LIKE lookup would
+ * read as a wildcard.
+ */
+export function normalizeEmail(input: unknown): string | null {
+  if (typeof input !== 'string')
+    return null
+  const email = input.trim().toLowerCase()
+  if (email.length > 254 || !/^[^\s@%]+@[^\s@%]+\.[^\s@%]+$/.test(email))
+    return null
+  return email
 }
 
 /**
@@ -196,6 +217,26 @@ export class Licenses {
     catch {
       return standing(license)
     }
+  }
+
+  /**
+   * The licenses bought with an address that are good right now, for sending
+   * their keys again. Each is checked the way the Mac app's check-in checks
+   * it, so a subscription cancelled in the portal is left out even before the
+   * app has noticed.
+   */
+  async activeFor(rawEmail: unknown): Promise<LicenseRecord[]> {
+    const email = normalizeEmail(rawEmail)
+    if (!email)
+      return []
+    const active: LicenseRecord[] = []
+    for (const license of await this.store.byEmail(email)) {
+      if (license.email?.trim().toLowerCase() !== email)
+        continue
+      if ((await this.check(license.key))?.valid)
+        active.push(license)
+    }
+    return active
   }
 
   /** The Stripe customer behind a key, for the customer portal. */

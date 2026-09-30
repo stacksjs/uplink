@@ -127,6 +127,7 @@ const seo = {
     --accent: #f59e0b;
     --accent-ink: #b45309;
     --accent-wash: #fffbeb;
+    --error: #b91c1c;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -137,6 +138,7 @@ const seo = {
       --raised: #141417;
       --accent-ink: #fbbf24;
       --accent-wash: #1c1508;
+      --error: #f87171;
     }
   }
 
@@ -156,7 +158,16 @@ const seo = {
   .uplink .u-btn-primary:hover { background: #fbbf24; }
   .uplink .u-btn-ghost { border: 1px solid var(--line); color: var(--ink); }
   .uplink .u-btn-ghost:hover { border-color: var(--muted); }
-  .uplink a:focus-visible, .uplink summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .uplink a:focus-visible, .uplink summary:focus-visible, .uplink button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .uplink button.u-btn:focus-visible { border-radius: 9999px; }
+
+  /* Fields share the pill shape of the buttons beside them. */
+  .uplink .u-input { border: 1px solid var(--line); border-radius: 9999px; background: var(--paper); color: var(--ink); padding: .75rem 1.25rem; font: inherit; transition: border-color .2s; }
+  .uplink .u-input::placeholder { color: var(--muted); opacity: 1; }
+  .uplink .u-input:hover { border-color: var(--muted); }
+  .uplink .u-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+  .uplink .u-input[aria-invalid="true"] { border-color: var(--error); }
+  .uplink .u-error { color: var(--error); }
 
   .uplink .u-nav { background: color-mix(in srgb, var(--paper) 82%, transparent); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); }
   @media (prefers-reduced-transparency: reduce) { .uplink .u-nav { background: var(--paper); backdrop-filter: none; } }

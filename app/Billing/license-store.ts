@@ -28,6 +28,13 @@ export const modelLicenseStore: LicenseStore = {
     const row = await License.where('key', key).first() as Record<string, any> | undefined
     return row ? fromRow(row) : null
   },
+  async byEmail(email) {
+    // LIKE, because Stripe keeps an address as the buyer typed it and SQLite's
+    // LIKE ignores ASCII case. It also reads `_` as a wildcard, so this can
+    // over-match; Licenses.activeFor keeps exact matches only.
+    const rows = await License.whereLike('email', email).get() as Array<Record<string, any>>
+    return rows.map(fromRow)
+  },
   async bySession(sessionId) {
     const row = await License.where('stripe_checkout_session_id', sessionId).first() as Record<string, any> | undefined
     return row ? fromRow(row) : null
