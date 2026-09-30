@@ -108,7 +108,14 @@ export const tsCloud: TsCloudConfig = {
             cache: {
               assetEdgeTtl: 2592000,
               documentEdgeTtl: 300,
-              bypassPaths: ['/api/', '/_stacks/'],
+              // Pages that are about one visitor. Cloudflare's document rule
+              // overrides the origin's no-store, and when it stores a page it
+              // drops the Set-Cookie: /license then served every visitor the
+              // same cached CSRF token and no cookie to match it, so its form
+              // could only ever answer 403. /thanks shows one buyer's key and
+              // must not show a pre-payment copy for five minutes; /checkout/
+              // opens a Stripe session per request.
+              bypassPaths: ['/api/', '/_stacks/', '/license', '/thanks', '/checkout/'],
             },
             purgeOnDeploy: true,
           },
