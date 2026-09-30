@@ -11,6 +11,7 @@ export const actions = {
   'Actions/License/ResendLicenseAction': '../../../app/Actions/License/ResendLicenseAction.ts',
   'Actions/NotifyUser': '../../../app/Actions/NotifyUser.ts',
   'Actions/SendWelcomeEmail': '../../../app/Actions/SendWelcomeEmail.ts',
+  'Actions/System/HealthAction': '../../../app/Actions/System/HealthAction.ts',
   'Actions/AI/AskAction': '../defaults/app/Actions/AI/AskAction.ts',
   'Actions/AI/SummaryAction': '../defaults/app/Actions/AI/SummaryAction.ts',
   'Actions/Auth/AuthUserAction': '../defaults/app/Actions/Auth/AuthUserAction.ts',

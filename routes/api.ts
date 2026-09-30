@@ -21,6 +21,10 @@ import { response, route } from '@stacksjs/router'
 // Your custom routes go here. This one answers `GET /api/hello`:
 route.get('/hello', () => response.text('hello world'))
 
+// Uptime monitoring's view of the license API: can it read its database.
+// StatusHQ polls this alongside a real license check (see the action).
+route.get('/health', 'Actions/System/HealthAction')
+
 // The Mac app's license check and its way into the Stripe customer portal.
 // Both take the license key, which is the only credential the app holds. No
 // cookie is involved - the caller is a native app, not a browser session - so
