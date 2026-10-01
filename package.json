@@ -93,7 +93,7 @@
     "bunfig": "^0.15.19",
     "pickier": "^0.1.65",
     "stacks": "^0.75.35",
-    "stripe": "22.6.2"
+    "stripe": "23.0.0"
   },
   "workspaces": [
     "storage/framework",
