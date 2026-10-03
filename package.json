@@ -87,7 +87,7 @@
     "docs:agent-counts:check": "./buddy docs:agent-counts:check"
   },
   "dependencies": {
-    "@stacksjs/actions": "^0.75.35",
+    "@stacksjs/actions": "^0.75.41",
     "@stacksjs/env": "^0.75.35",
     "@stacksjs/path": "^0.75.35",
     "bunfig": "^0.15.19",
