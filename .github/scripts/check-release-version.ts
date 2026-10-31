@@ -20,7 +20,27 @@ import release from '../../resources/data/release.json'
 
 const problems: string[] = []
 
-if (release.version !== pkg.version) {
+function compareVersions(a: string, b: string): number {
+  const left = a.split('.').map(Number)
+  const right = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    const difference = (left[i] ?? 0) - (right[i] ?? 0)
+    if (difference !== 0)
+      return difference
+  }
+  return 0
+}
+
+// A package.json ahead of release.json is a version that has been bumped and
+// not yet shipped as a DMG: the Mac App Store build is stamped from the same
+// version and goes out first. That is worth saying, and not worth a red build.
+// Behind, or any other disagreement, still fails: the homepage would be
+// advertising something that does not exist.
+const pending = release.version !== pkg.version && compareVersions(pkg.version, release.version) > 0
+if (pending) {
+  console.warn(`::warning::package.json is ${pkg.version} and the homepage still advertises ${release.version}. Run \`buddy uplink:release\` to publish the DMG.`)
+}
+else if (release.version !== pkg.version) {
   problems.push(
     `resources/data/release.json says ${release.version}, package.json says ${pkg.version}.`,
     '  The homepage download button reads release.json, so it is advertising a different build.',
@@ -41,4 +61,6 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
-console.log(`Version ${pkg.version} agrees across package.json, release.json and the Info.plist.`)
+console.log(pending
+  ? `Version ${pkg.version} is ahead of release.json (${release.version}) and agrees with the Info.plist.`
+  : `Version ${pkg.version} agrees across package.json, release.json and the Info.plist.`)
