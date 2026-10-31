@@ -228,7 +228,15 @@ export class Uplink {
       this.refreshHandles(false)
       const messages = this.deps.messages.since(this.cursor)
       for (const message of messages) {
-        await this.consider(message)
+        try {
+          await this.consider(message)
+        }
+        catch (error) {
+          // At most once. Leaving the cursor behind a text that throws would
+          // replay it every poll, forever, ahead of everything that follows,
+          // and a replay can start the same agent run again.
+          this.log.error(`Could not handle row ${message.rowid} from ${message.chatIdentifier}: ${error instanceof Error ? error.message : String(error)}`)
+        }
         this.cursor = message.rowid
         await this.deps.store.setCursor(this.cursor)
       }
@@ -292,6 +300,7 @@ export class Uplink {
     const key = `${thread}\u0000${verdict.text}`
     const previous = this.lastCommand.get(key)
     this.lastCommand.set(key, message.sentAt)
+    this.forgetOldCommands(message.sentAt)
     if (previous !== undefined && Math.abs(message.sentAt - previous) < DUPLICATE_WINDOW_MS)
       return
 
@@ -308,6 +317,20 @@ export class Uplink {
       await this.control(control, target)
     else
       await this.enqueue(verdict.text, message, target)
+  }
+
+  /**
+   * The duplicate guard only looks back DUPLICATE_WINDOW_MS, but the map was
+   * keyed by the full text and never emptied: a daemon that runs for months
+   * kept every prompt it was ever sent.
+   */
+  private forgetOldCommands(latest: number): void {
+    if (this.lastCommand.size < 200)
+      return
+    for (const [key, at] of this.lastCommand) {
+      if (latest - at > DUPLICATE_WINDOW_MS)
+        this.lastCommand.delete(key)
+    }
   }
 
   private chat(chatGuid: string): ChatState {
@@ -416,17 +439,7 @@ export class Uplink {
 
     await this.deps.store.updateRun(job.runId, { status: 'running', startedAt: this.now() })
 
-    const run = this.engineOf(job.engine).run({
-      prompt: job.prompt,
-      cwd: job.cwd,
-      sessionId: resume,
-      onEvent: (event) => {
-        if (event.kind === 'tool' && state.active) {
-          state.active.lastActivity = event.summary
-          void this.deps.store.updateRun(job.runId, { lastActivity: event.summary })
-        }
-      },
-    })
+    const run = this.launch(job, resume, state)
 
     const active: ActiveJob = { ...job, run, startedAt: this.now(), lastActivity: null, stoppedByUser: false, timers: [] }
     state.active = active
@@ -451,10 +464,52 @@ export class Uplink {
       active.timers.push(setTimeout(tickProgress, this.config.progressEveryMs))
     }
 
-    void run.done.then(result => this.finish(state, active, result))
+    // An engine whose promise rejects is a failed run, not a thread that is
+    // "working" until the Mac restarts.
+    void run.done
+      .catch((error): Awaited<EngineRun['done']> => crashed(error))
+      .then(result => this.finish(state, active, result))
+  }
+
+  /**
+   * Starts the engine. A CLI that cannot be spawned (moved, deleted, not
+   * executable) throws here rather than reporting a failed run, and that must
+   * come back to the sender as one.
+   */
+  private launch(job: Job, resume: string | null, state: ChatState): EngineRun {
+    try {
+      return this.engineOf(job.engine).run({
+        prompt: job.prompt,
+        cwd: job.cwd,
+        sessionId: resume,
+        onEvent: (event) => {
+          if (event.kind === 'tool' && state.active) {
+            state.active.lastActivity = event.summary
+            void this.deps.store.updateRun(job.runId, { lastActivity: event.summary })
+          }
+        },
+      })
+    }
+    catch (error) {
+      return { done: Promise.resolve(crashed(error)), cancel: () => {} }
+    }
   }
 
   private async finish(state: ChatState, active: ActiveJob, result: Awaited<EngineRun['done']>): Promise<void> {
+    try {
+      await this.conclude(state, active, result)
+    }
+    catch (error) {
+      this.log.error(`Could not finish run ${active.runId}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    // Whatever went wrong recording this run, the texts queued behind it are
+    // still waiting on an answer.
+    const next = state.queue.shift()
+    if (next && !this.stopped)
+      await this.begin(state, next).catch(error => this.log.error(`Could not start run ${next.runId}: ${error instanceof Error ? error.message : String(error)}`))
+  }
+
+  private async conclude(state: ChatState, active: ActiveJob, result: Awaited<EngineRun['done']>): Promise<void> {
     for (const timer of active.timers)
       clearTimeout(timer)
     if (state.active === active)
@@ -498,10 +553,6 @@ export class Uplink {
         })
       }
     }
-
-    const next = state.queue.shift()
-    if (next && !this.stopped)
-      await this.begin(state, next)
   }
 
   /**
@@ -626,6 +677,18 @@ export class Uplink {
     }
     this.lastSendError = null
     return true
+  }
+}
+
+function crashed(error: unknown): Awaited<EngineRun['done']> {
+  return {
+    ok: false,
+    text: `The agent could not be started: ${error instanceof Error ? error.message : String(error)}`,
+    sessionId: null,
+    costCents: null,
+    durationMs: 0,
+    turns: null,
+    authFailure: false,
   }
 }
 

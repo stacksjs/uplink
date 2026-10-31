@@ -438,5 +438,71 @@ describe('Uplink', () => {
     expect(h.engine.runs[0].request.prompt).toContain('new task')
     expect(h.sender.texts().filter(t => t.includes('while this Mac was asleep'))).toHaveLength(1)
   })
-})
 
+  it('answers a text whose agent cannot be spawned, and keeps listening', async () => {
+    const h = await harness()
+    // Bun.spawn throws, rather than exiting 127, for a binary that is gone.
+    const spawn = h.engine.run.bind(h.engine)
+    h.engine.run = () => { throw new Error('ENOENT: no such file or directory, posix_spawn \'claude\'') }
+    h.fake.add({ chat: ME, text: 'first task', fromMe: true })
+    await h.uplink.tick()
+    await settle()
+
+    expect(h.sender.texts()).toHaveLength(1)
+    expect(h.sender.texts()[0]).toContain('The agent could not be started')
+    expect(h.store.cursorValue).toBeGreaterThan(0)
+
+    // The cursor moved on, so this is the only thing the next poll sees.
+    h.engine.run = spawn
+    h.fake.add({ chat: ME, text: 'second task', fromMe: true, at: Date.now() + 20_000 })
+    await h.uplink.tick()
+    expect(h.engine.runs).toHaveLength(1)
+    expect(h.engine.runs[0].request.prompt).toBe('second task')
+  })
+
+  it('does not leave a thread working when the engine promise rejects', async () => {
+    const h = await harness()
+    h.engine.run = () => ({ done: Promise.reject(new Error('spawn failed')), cancel: () => {} })
+    h.fake.add({ chat: ME, text: 'first task', fromMe: true })
+    h.fake.add({ chat: ME, text: 'queued task', fromMe: true, at: Date.now() + 20_000 })
+    await h.uplink.tick()
+    await settle()
+
+    expect(h.uplink.activeRuns).toEqual([])
+    // Both texts got an answer: the queued one was started, not stranded.
+    expect(h.sender.texts().filter(t => t.includes('The agent could not be started: spawn failed'))).toHaveLength(2)
+  })
+
+  it('moves past a text that throws instead of replaying it every poll', async () => {
+    const h = await harness()
+    const create = h.store.createRun.bind(h.store)
+    let failures = 1
+    h.store.createRun = async (record) => {
+      if (failures-- > 0)
+        throw new Error('database is locked')
+      return create(record)
+    }
+    h.fake.add({ chat: ME, text: 'poison', fromMe: true })
+    h.fake.add({ chat: ME, text: 'after it', fromMe: true, at: Date.now() + 20_000 })
+    await h.uplink.tick()
+
+    expect(h.engine.runs).toHaveLength(1)
+    expect(h.engine.runs[0].request.prompt).toBe('after it')
+    await h.uplink.tick()
+    expect(h.engine.runs).toHaveLength(1)
+  })
+
+  it('starts the next queued task even when recording the finished one fails', async () => {
+    const h = await harness()
+    h.fake.add({ chat: ME, text: 'one', fromMe: true })
+    h.fake.add({ chat: ME, text: 'two', fromMe: true, at: Date.now() + 20_000 })
+    await h.uplink.tick()
+    expect(h.engine.runs).toHaveLength(1)
+
+    h.store.saveConversation = async () => { throw new Error('disk full') }
+    h.engine.finish(0, 'done one')
+    await settle()
+    expect(h.engine.runs).toHaveLength(2)
+    expect(h.engine.runs[1].request.prompt).toBe('two')
+  })
+})
