@@ -222,7 +222,7 @@ jobs:
           for path in login cart checkout/payment errors/tester; do
             [ "$(status "$path")" = 404 ] || { echo "::error::/$path answers $(status "$path") - framework default views are being served."; exit 1; }
           done
-          [ "$(status images/california-night-960.jpg)" = 200 ] || { echo "::error::The hero image is not being served."; exit 1; }
+          [ "$(status images/milky-way-airglow-960.jpg)" = 200 ] || { echo "::error::The hero image is not being served."; exit 1; }
           # Pricing renders, and a plan's checkout hands over to Stripe: a 303
           # to checkout.stripe.com proves the Stripe key decrypted, the prices
           # exist and the SDK is installed. It creates one unpaid session, which

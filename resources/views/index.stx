@@ -4,12 +4,13 @@
  *
  * Design read: a product landing page for technical Mac users, calm
  * dark-tech language, Geist + one sodium-amber accent (the colour of the
- * city lights in the hero photo). Dials 7 / 5 / 4.
+ * city lights on the globe). Dials 7 / 5 / 4.
  *
  * Everything shown is real: the two exchanges are genuine Uplink replies
  * from 2026-09-27 (passed through the same formatter a text goes through),
- * the commands are the ones the app ships, the photos are NASA's.
- * No client script: motion is CSS only, and every animation has a
+ * the commands are the ones the app ships, the globe is drawn from Natural
+ * Earth's land (partials/hero-globe.stx), the other photo is NASA's.
+ * No client script: motion is CSS and SVG only, and every animation has a
  * reduced-motion fallback.
  */
 const path = '/'
@@ -138,7 +139,6 @@ const faqs = [
 <html lang="en">
   <head>
     @include('site-head')
-    <link rel="preload" as="image" href="/images/california-night-1920.jpg" imagesrcset="/images/california-night-960.jpg 960w, /images/california-night-1920.jpg 1920w" imagesizes="(min-width: 1024px) 50vw, 100vw">
   </head>
   <body class="antialiased uplink">
     @include('site-nav')
@@ -161,18 +161,7 @@ const faqs = [
           </div>
           <p class="mt-6 text-sm u-mono u-muted u-rise" style="--i: 3">From $1.99 a month. Signed and notarized. macOS 13+.</p>
         </div>
-        <figure class="overflow-hidden rounded-2xl u-rise" style="--i: 1">
-          <img
-            src="/images/california-night-1920.jpg"
-            srcset="/images/california-night-960.jpg 960w, /images/california-night-1920.jpg 1920w"
-            sizes="(min-width: 1024px) 50vw, 100vw"
-            width="1920"
-            height="1277"
-            alt="The California coast at night from the International Space Station, city lights glowing orange under a thin band of atmosphere"
-            class="block h-auto w-full"
-            fetchpriority="high"
-          >
-        </figure>
+        @include('hero-globe')
       </section>
 
       <section class="border-t u-line" aria-labelledby="real-texts">
