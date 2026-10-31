@@ -4,7 +4,7 @@ import type { Engine, EngineId, EngineRun } from './engine'
 import type { IncomingMessage } from './messages-db'
 import type { ReplyTarget, Sender } from './sender'
 import type { ConversationRecord, Store } from './store'
-import { homedir } from 'node:os'
+import { userHome } from './home'
 import { HELP_TEXT, parseControl } from './commands'
 import { classify, RecentTexts } from './filter'
 import { chunk, formatDuration, toPlainText, truncate } from './format'
@@ -448,7 +448,7 @@ export class Uplink {
       active.timers.push(setTimeout(() => {
         if (state.active !== active)
           return
-        const where = job.cwd === homedir() || job.cwd === this.config.workdir ? '' : ` in ${tildify(job.cwd)}`
+        const where = job.cwd === userHome() || job.cwd === this.config.workdir ? '' : ` in ${tildify(job.cwd)}`
         void this.reply(job.target, `Working on it${where}. Text "status" for progress or "stop" to cancel.`)
       }, this.config.ackAfterMs))
     }
@@ -693,6 +693,6 @@ function crashed(error: unknown): Awaited<EngineRun['done']> {
 }
 
 function tildify(path: string): string {
-  const home = homedir()
+  const home = userHome()
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }

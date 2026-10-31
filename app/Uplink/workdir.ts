@@ -1,5 +1,5 @@
 import { existsSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { userHome } from './home'
 import { dirname, join, resolve } from 'node:path'
 
 /**
@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path'
  * The first path in the text that exists wins, widened to its git repository
  * root. No path means the default workdir.
  */
-export function detectWorkdir(prompt: string, fallback: string, home: string = homedir()): string {
+export function detectWorkdir(prompt: string, fallback: string, home: string = userHome()): string {
   const candidates = prompt.match(/(?:~|\/Users\/[^/\s]+)(?:\/[\w.@+-]+)+\/?|~(?=\s|$)/g) ?? []
 
   for (const raw of candidates) {

@@ -184,3 +184,4 @@ docs/erd.md
 
 # Uplink runtime state: the compiled Uplink.app, its heartbeat and the chat.db cursor
 storage/uplink/
+/storage/framework/mas

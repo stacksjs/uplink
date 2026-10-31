@@ -1,5 +1,5 @@
 import type { Check, Heartbeat } from './doctor'
-import { homedir } from 'node:os'
+import { userHome } from './home'
 import process from 'node:process'
 import Run from '../Models/Run'
 import { loadConfig } from './config'
@@ -36,7 +36,7 @@ export interface DashboardData {
 function tildify(path: string | null): string {
   if (!path)
     return '~'
-  const home = homedir()
+  const home = userHome()
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }
 

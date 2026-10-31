@@ -1,7 +1,7 @@
 import type { CodexPermission } from './codex-engine'
 import type { EngineId } from './engine'
 import type { UplinkConfig } from './types'
-import { homedir } from 'node:os'
+import { userHome } from './home'
 import { join } from 'node:path'
 import process from 'node:process'
 import { applyEnvVarsToConfig } from 'bunfig'
@@ -75,7 +75,7 @@ function withEnv<T>(env: Env, read: () => T): T {
 }
 
 function expandHome(path: string): string {
-  return path === '~' ? homedir() : path.replace(/^~\//, `${homedir()}/`)
+  return path === '~' ? userHome() : path.replace(/^~\//, `${userHome()}/`)
 }
 
 function engineId(value: string | undefined): EngineId {
@@ -97,12 +97,12 @@ function findClaude(): string {
   if (fromPath)
     return fromPath
   for (const candidate of [
-    join(homedir(), '.local', 'bin', 'claude'),
-    join(homedir(), '.claude', 'local', 'claude'),
+    join(userHome(), '.local', 'bin', 'claude'),
+    join(userHome(), '.claude', 'local', 'claude'),
     // `bun install -g` and an npm global prefix, both of which the PATH the
     // launchers build also covers.
-    join(homedir(), '.bun', 'bin', 'claude'),
-    join(homedir(), '.npm-global', 'bin', 'claude'),
+    join(userHome(), '.bun', 'bin', 'claude'),
+    join(userHome(), '.npm-global', 'bin', 'claude'),
     '/opt/homebrew/bin/claude',
     '/usr/local/bin/claude',
   ]) {
@@ -124,8 +124,8 @@ function findCodex(): string {
     return fromPath
   for (const candidate of [
     '/Applications/ChatGPT.app/Contents/Resources/codex',
-    join(homedir(), '.local', 'bin', 'codex'),
-    join(homedir(), '.bun', 'bin', 'codex'),
+    join(userHome(), '.local', 'bin', 'codex'),
+    join(userHome(), '.bun', 'bin', 'codex'),
     '/opt/homebrew/bin/codex',
     '/usr/local/bin/codex',
   ]) {
@@ -148,6 +148,6 @@ export function systemPrompt(config: UplinkConfig): string {
     '  ask clarifying questions unless the request is truly ambiguous; pick the sensible reading and say which.',
     '- Only commit, push, deploy or send anything outward if the text asks for it.',
     '- Finish with a short summary of what you did and anything that still needs the user.',
-    `- The user's home directory is ${homedir()}.`,
+    `- The user's home directory is ${userHome()}.`,
   ].join('\n')
 }

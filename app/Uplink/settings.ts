@@ -1,6 +1,7 @@
 import type { EngineId } from './engine'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { userHome } from './home'
 import { join } from 'node:path'
 import { isEngineId } from './engine'
 
@@ -50,7 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
   allowed: [],
   engine: 'claude',
   model: null,
-  workdir: homedir(),
+  workdir: userHome(),
   openAtLogin: true,
   paused: false,
 }

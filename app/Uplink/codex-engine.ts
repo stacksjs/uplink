@@ -2,11 +2,11 @@ import type { Subprocess } from 'bun'
 import type { Engine, EngineInstall, EngineProbe, EngineRequest, EngineResult, EngineRun } from './engine'
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { binaryExists, PROBE_TIMEOUT_MS } from './engine'
 import { truncate } from './format'
+import { agentHomeEnv, scratchDir } from './home'
 import { killTree } from './process-tree'
 
 /**
@@ -79,7 +79,7 @@ export class CodexEngine implements Engine {
 
     try {
       const proc = Bun.spawn([this.options.bin, 'login', 'status'], {
-        cwd: tmpdir(),
+        cwd: scratchDir(),
         env: this.env(),
         stdin: 'ignore',
         stdout: 'pipe',
@@ -142,7 +142,7 @@ export class CodexEngine implements Engine {
     const started = Date.now()
     let cancelled = false
     let timedOut = false
-    const lastMessageFile = join(tmpdir(), `uplink-codex-${randomUUID()}.txt`)
+    const lastMessageFile = join(scratchDir(), `uplink-codex-${randomUUID()}.txt`)
 
     let proc: Subprocess<'ignore', 'pipe', 'pipe'> | null = null
     const stopTree = (): void => {
@@ -296,7 +296,7 @@ export class CodexEngine implements Engine {
   }
 
   private env(): Record<string, string | undefined> {
-    return { ...process.env, ...this.options.env }
+    return { ...process.env, ...this.options.env, ...agentHomeEnv() }
   }
 }
 

@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite'
-import { homedir } from 'node:os'
+import { userHome } from './home'
 import { join } from 'node:path'
 import { isAddressable, normalizeHandle } from './handles'
 import { decodeAttributedBody } from './typedstream'
@@ -13,7 +13,7 @@ import { decodeAttributedBody } from './typedstream'
  * terminal running `buddy uplink:watch`). Nothing here ever writes to it.
  */
 
-export const DEFAULT_MESSAGES_DB = join(homedir(), 'Library', 'Messages', 'chat.db')
+export const DEFAULT_MESSAGES_DB = join(userHome(), 'Library', 'Messages', 'chat.db')
 
 /** Seconds between the Unix epoch and Apple's (2001-01-01T00:00:00Z). */
 const APPLE_EPOCH_OFFSET_S = 978_307_200

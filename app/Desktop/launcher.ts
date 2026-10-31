@@ -10,6 +10,13 @@
  *
  * Run from source for development with `bun app/Desktop/launcher.ts`; Craft
  * then comes from CRAFT_BIN or PATH (pantry installs it).
+ *
+ * The Mac App Store build turns this around. Under the App Sandbox a plain child
+ * cannot register as a GUI app (AppKit aborts in `RegisterApplication`), so
+ * Craft's sandboxed host is the app and this is its backend, started as
+ * `craft-backend --serve --managed`. It then speaks Craft's bundle protocol:
+ * print one loopback URL carrying a session token, answer only requests that
+ * hold that token, and exit when the host closes our stdin.
  */
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -72,7 +79,11 @@ function craftRuntime(): string {
 // KeepAlive restarts a non-zero exit, so the loop would be silent: the plist
 // sets no StandardErrorPath, and the rebinding above only catches what goes
 // through `console`. Exit the same way, having said why first.
-const agent = await startDesktopAgent({ version: pkg.version }).catch((error: unknown) => {
+const managed = process.argv.includes('--managed')
+// Alphanumeric and hyphens, at most 256: what the host accepts in the URL.
+const session = managed ? crypto.randomUUID() : undefined
+
+const agent = await startDesktopAgent({ version: pkg.version, session }).catch((error: unknown) => {
   console.error(`[uplink] could not start: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   return process.exit(1)
 })
@@ -82,22 +93,29 @@ console.log(`[uplink] ${pkg.version} serving the menubar on 127.0.0.1:${agent.po
 // material, opens and closes it on the item's click, and closes it on a click
 // anywhere else. It stays hidden until then, or until the page opens it itself
 // because setup is unfinished. The page sizes it to its content.
-const craft = Bun.spawn([
-  craftRuntime(),
-  `http://127.0.0.1:${agent.port}/`,
-  '--title',
-  'Uplink',
-  '--tray-popover',
-  '--width',
-  '340',
-  '--height',
-  '420',
-], { stdio: ['ignore', 'ignore', 'pipe'] })
+//
+// Managed (the sandboxed store build): the host is already running and is the
+// one asking, so there is no menubar process of ours to start.
+const craft = managed
+  ? null
+  : Bun.spawn([
+      craftRuntime(),
+      `http://127.0.0.1:${agent.port}/`,
+      '--title',
+      'Uplink',
+      '--tray-popover',
+      '--width',
+      '340',
+      '--height',
+      '420',
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
 
-void new Response(craft.stderr).text().then((stderr) => {
-  if (stderr.trim())
-    console.error(`[craft] ${stderr.trim()}`)
-})
+if (craft) {
+  void new Response(craft.stderr).text().then((stderr) => {
+    if (stderr.trim())
+      console.error(`[craft] ${stderr.trim()}`)
+  })
+}
 
 // The point is answering while you are away, so hold off idle sleep.
 const keepAwake = Bun.spawn(['/usr/bin/caffeinate', '-i', '-w', String(process.pid)], { stdio: ['ignore', 'ignore', 'ignore'] })
@@ -109,7 +127,7 @@ let stopping = false
 async function shutdown(code: number): Promise<never> {
   if (!stopping) {
     stopping = true
-    craft.kill()
+    craft?.kill()
     keepAwake.kill()
     await agent.stop()
   }
@@ -119,8 +137,22 @@ async function shutdown(code: number): Promise<never> {
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const)
   process.on(signal, () => void shutdown(0))
 
+if (managed) {
+  // The handshake: one line, then silence on stdout. Written directly, because
+  // `console.log` goes to the log file when there is no terminal.
+  process.stdout.write(`http://127.0.0.1:${agent.port}/?session=${session}\n`)
+  console.log('[uplink] managed by the native host')
+  // The host closes our stdin when it quits, which is the only goodbye we get.
+  // The agent flushes its state in `shutdown`.
+  for await (const _ of process.stdin) {
+    // Nothing is expected on stdin; reading it is how EOF is noticed.
+  }
+  console.log('[uplink] the host closed stdin; shutting down')
+  await shutdown(0)
+}
+
 const menubarStartedAt = Date.now()
-const exitCode = await craft.exited
+const exitCode = await craft!.exited
 console.log(`[uplink] menubar exited (${exitCode})`)
 
 // Quit from the popover or the menu goes through the agent, so it is known to

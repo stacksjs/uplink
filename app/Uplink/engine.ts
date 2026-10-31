@@ -1,7 +1,7 @@
 import type { Subprocess } from 'bun'
-import { tmpdir } from 'node:os'
 import process from 'node:process'
 import { truncate } from './format'
+import { agentHomeEnv, scratchDir } from './home'
 import { killTree } from './process-tree'
 
 /**
@@ -140,17 +140,27 @@ export class ClaudeEngine implements Engine {
 
     try {
       const proc = Bun.spawn([this.options.bin, '-p', 'Reply with exactly: ok', '--model', 'haiku', '--output-format', 'json'], {
-        cwd: tmpdir(),
+        cwd: scratchDir(),
         env: this.env(),
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
       })
       const timer = setTimeout(() => proc.kill(), PROBE_TIMEOUT_MS)
+      const stderr = new Response(proc.stderr).text()
       const text = await new Response(proc.stdout).text()
       clearTimeout(timer)
-      await proc.exited
-      const result = JSON.parse(text) as { is_error?: boolean, result?: string }
+      const exitCode = await proc.exited
+      let result: { is_error?: boolean, result?: string }
+      try {
+        result = JSON.parse(text) as { is_error?: boolean, result?: string }
+      }
+      catch {
+        // Nothing parseable: the CLI died or was refused before it could answer.
+        // Its own words are the only useful thing to show, not our parser's.
+        const said = (await stderr).trim() || text.trim()
+        return { ok: false, reason: 'failed', detail: said ? truncate(said, 200) : `Claude exited ${exitCode} without an answer.` }
+      }
       if (result.is_error) {
         const said = truncate(result.result ?? 'Claude did not answer', 140)
         return AUTH_FAILURE.test(said)
@@ -175,7 +185,7 @@ export class ClaudeEngine implements Engine {
    * would not have.
    */
   private env(): Record<string, string | undefined> {
-    const env: Record<string, string | undefined> = { ...process.env, ...this.options.env }
+    const env: Record<string, string | undefined> = { ...process.env, ...this.options.env, ...agentHomeEnv() }
     if (!env.CLAUDE_CODE_OAUTH_TOKEN)
       delete env.CLAUDE_CODE_OAUTH_TOKEN
     return env

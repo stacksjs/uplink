@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The Mac App Store (and TestFlight) requires the App Sandbox. TEAM_ID is
+	     filled in by `buddy uplink:mas`; a local build drops the two identifiers,
+	     because only a provisioning profile can vouch for them. -->
+	<key>com.apple.application-identifier</key>
+	<string>TEAM_ID.com.stacksjs.uplink</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TEAM_ID</string>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<!-- The license check, and the menubar popover's loopback server. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+
+	<!-- Bun's JavaScriptCore JIT. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+
+	<!-- Replies go through Messages; "Sign in" runs a command in Terminal. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.apple-events</key>
+	<array>
+		<string>com.apple.MobileSMS</string>
+		<string>com.apple.Terminal</string>
+	</array>
+
+	<!-- What Uplink is for: reading ~/Library/Messages/chat.db (macOS still
+	     asks for Full Disk Access), running Claude Code or Codex in the
+	     repository a text names, and the login item. The agents inherit this
+	     sandbox, so this is also the extent of what a text can reach. -->
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
+		<string>/</string>
+	</array>
+</dict>
+</plist>

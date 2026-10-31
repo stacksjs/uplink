@@ -1,4 +1,5 @@
 import type { Subprocess } from 'bun'
+import { agentHomeEnv } from './home'
 
 /**
  * Signing in without a terminal.
@@ -165,7 +166,7 @@ export class SignIn {
     let captured = false
     const decoder = new TextDecoder()
     const proc = Bun.spawn(options.command, {
-      env: { ...process.env, ...options.env },
+      env: { ...process.env, ...options.env, ...agentHomeEnv() },
       terminal: {
         cols: 1000,
         rows: 50,

@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
+import { SANDBOXED, userHome } from './home'
 
 /**
  * The PATH an Uplink process needs.
@@ -18,7 +19,8 @@ import process from 'node:process'
  */
 export function agentPath(options: { appDir?: string, env?: Record<string, string | undefined> } = {}): string {
   const env = options.env ?? process.env
-  const home = env.HOME ?? homedir()
+  // Under the sandbox $HOME is the app's container, not where the CLIs live.
+  const home = SANDBOXED ? userHome() : env.HOME ?? homedir()
 
   return [
     // Where the installers put the agent CLIs.

@@ -4,10 +4,10 @@ import type { UplinkConfig } from './config'
 import type { EngineId, EngineInstall, EngineProbe, ProbeReason } from './engine'
 import type { AutomationState } from './sender'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { loadConfig } from './config'
+import { userHome } from './home'
 import { allEngines, engineFor, selectedEngine } from './engines'
 import { formatDuration, truncate } from './format'
 import { MessagesAccessError, MessagesDb } from './messages-db'
@@ -40,8 +40,10 @@ export const LABEL = 'com.stacksjs.uplink'
  * wrong.
  */
 const IN_APP_BUNDLE = process.execPath.includes('.app/Contents/MacOS/')
+/** Started by Craft's sandboxed host, as `craft-backend --managed`. */
+const MANAGED = process.argv.includes('--managed')
 const LOCK_PATH = join(DATA_DIR, 'uplink.pid')
-const LAUNCH_AGENT = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
+const LAUNCH_AGENT = join(userHome(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
 const RETRY_OPEN_MS = 5_000
 
 type EngineState = EngineProbe & { checkedAt: number }
@@ -127,13 +129,15 @@ function retireOtherInstall(): string | null {
  * bootstrapped: loading it now would start a second copy of the app.
  */
 export function setOpenAtLogin(enabled: boolean): void {
-  if (!IN_APP_BUNDLE)
+  // The sandboxed build's host owns the login item (SMAppService), and a
+  // LaunchAgent that starts only the backend would run it with no menubar.
+  if (!IN_APP_BUNDLE || MANAGED)
     return
   if (!enabled) {
     rmSync(LAUNCH_AGENT, { force: true })
     return
   }
-  mkdirSync(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true })
+  mkdirSync(join(userHome(), 'Library', 'LaunchAgents'), { recursive: true })
   writeFileSync(LAUNCH_AGENT, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -149,7 +153,30 @@ export function setOpenAtLogin(enabled: boolean): void {
 }
 
 
-export async function startDesktopAgent(options: { version: string }): Promise<DesktopAgent> {
+const SESSION_COOKIE = 'uplink_session'
+
+/** Constant-time, so the token cannot be recovered a byte at a time. */
+function sameToken(a: string, b: string): boolean {
+  const left = new TextEncoder().encode(a)
+  const right = new TextEncoder().encode(b)
+  if (left.length !== right.length)
+    return false
+  let difference = 0
+  for (let i = 0; i < left.length; i++)
+    difference |= left[i]! ^ right[i]!
+  return difference === 0
+}
+
+function cookieOf(request: Request, name: string): string | null {
+  for (const part of (request.headers.get('cookie') ?? '').split(';')) {
+    const [key, ...value] = part.trim().split('=')
+    if (key === name)
+      return value.join('=')
+  }
+  return null
+}
+
+export async function startDesktopAgent(options: { version: string, session?: string }): Promise<DesktopAgent> {
   mkdirSync(DATA_DIR, { recursive: true })
   const retired = retireOtherInstall()
   if (retired)
@@ -529,8 +556,25 @@ export async function startDesktopAgent(options: { version: string }): Promise<D
       if (origin && origin !== url.origin)
         return json({ error: 'forbidden' }, 403)
 
-      if (request.method === 'GET' && url.pathname === '/')
-        return new Response(MENUBAR_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
+      // The sandboxed build is started by a native host that hands the page a
+      // one-time token in the URL. Anything else on this Mac can reach a
+      // loopback port, so without the token (or the cookie it earns) there is
+      // no API: it can change who may command an agent with approvals off.
+      let opening = false
+      if (options.session) {
+        const linked = url.searchParams.get('session')
+        opening = request.method === 'GET' && url.pathname === '/' && linked !== null && sameToken(linked, options.session)
+        const cookie = cookieOf(request, SESSION_COOKIE)
+        if (!opening && !(cookie !== null && sameToken(cookie, options.session)))
+          return json({ error: 'forbidden' }, 403)
+      }
+
+      if (request.method === 'GET' && url.pathname === '/') {
+        const headers: Record<string, string> = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }
+        if (opening)
+          headers['set-cookie'] = `${SESSION_COOKIE}=${options.session}; Path=/; HttpOnly; SameSite=Strict`
+        return new Response(MENUBAR_HTML, { headers })
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/status')
         return json(status())

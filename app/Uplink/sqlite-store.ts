@@ -1,7 +1,7 @@
 import type { ConversationRecord, RunRecord, Store } from './store'
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { userHome } from './home'
 import { dirname } from 'node:path'
 
 /**
@@ -317,6 +317,6 @@ function message(error: unknown): string {
 }
 
 function tilde(path: string): string {
-  const home = homedir()
+  const home = userHome()
   return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
 }
