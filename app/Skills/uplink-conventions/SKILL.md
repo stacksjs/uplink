@@ -142,6 +142,32 @@ with one caller each. Making them global costs namespace and gains nothing.
 Weigh any move the same way: auto-import buys something for stx templates, routes and actions. For a
 module that is only ever imported by other TypeScript, it buys nothing.
 
+## The Mac App Store build (`buddy uplink:mas`)
+
+A second way to ship, sandboxed, for the store and TestFlight. Everything in the first section
+still holds; these are the things that fail quietly.
+
+- **Craft's sandboxed host is the app.** Under the App Sandbox a plain child process cannot become
+  a GUI app (AppKit aborts in `RegisterApplication`, exit 134), so `craft-app-store` is the main
+  executable and Uplink is `craft-backend`, started `--serve --managed`. In that mode
+  `app/Desktop/launcher.ts` prints one `http://127.0.0.1:<port>/?session=<token>` line, the agent
+  answers only requests holding that token, and EOF on stdin is the host's goodbye.
+- **No `trayPopover`.** It needs a transparent web material the public-API runtime lacks and
+  fails with `UnsupportedWebViewTransparency`. The store build is a status item plus a window.
+- **Use `app/Uplink/home.ts`, not `os.homedir()`,** for anything on the person's Mac. Under the
+  sandbox `$HOME` is the container. `scratchDir()` rather than `tmpdir()` for where an agent starts:
+  `$TMPDIR` of an inheriting helper can point somewhere the sandbox refuses, and both `claude` and
+  `codex` then die with EPERM before saying anything.
+- **Try it without a profile:** `./buddy uplink:mas --local` signs ad hoc. Launch it from a path that
+  does not contain `.app/Contents/MacOS/` if the DMG install is running, or the app's "retire the
+  other install" logic stops that install's launchd job.
+- **Craft is pinned in `deps.yml`** (the DMG path needs `pantry/craft-native.org/<v>/bin/craft`, not the
+  `.bin/craft` wrapper; `craftBinary()` finds it). 0.0.98 has no store runtime.
+- **Upload:** `APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_ISSUER_ID` in the environment, the
+  key at `~/.appstoreconnect/private_keys/AuthKey_<id>.p8`, then
+  `buddy uplink:mas --build <n> --upload`. The build number must rise on every upload.
+- **App Store name.** "Uplink" is taken; the record is "Uplink: Text Your Mac".
+
 ## Before you finish
 
 - `./buddy lint` and `./buddy typecheck`.

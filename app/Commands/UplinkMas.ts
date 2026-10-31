@@ -48,7 +48,7 @@ export default defineCommand((cli) => {
       }
 
       const identity = process.env.UPLINK_MAS_APP_IDENTITY ?? 'Apple Distribution: Chris Breuer (3JJRNQW6B7)'
-      const installer = process.env.UPLINK_MAS_INSTALLER_IDENTITY ?? 'Mac Installer Distribution: Chris Breuer (3JJRNQW6B7)'
+      const installer = process.env.UPLINK_MAS_INSTALLER_IDENTITY ?? '3rd Party Mac Developer Installer: Chris Breuer (3JJRNQW6B7)'
       const teamId = process.env.UPLINK_TEAM_ID ?? identity.match(/\(([A-Z0-9]{10})\)\s*$/)?.[1]
       if (!teamId)
         throw new Error('Cannot tell the Apple team from the signing identity. Set UPLINK_TEAM_ID.')
