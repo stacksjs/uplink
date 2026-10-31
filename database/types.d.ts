@@ -445,6 +445,20 @@ declare module '@stacksjs/database' {
       occurred_at: string
       team_id: number
     }
+    conversations: {
+      // columns
+      id: number
+      created_at: string
+      updated_at: string | null
+      chat_guid: string
+      handle: string
+      service: string
+      session_id: string
+      cwd: string
+      last_active_at: number
+      more_text: string
+      engine: "claude" | "codex"
+    }
     coupons: {
       // columns
       id: number
@@ -817,6 +831,21 @@ declare module '@stacksjs/database' {
       customer_id: number
       product_id: number
       order_id: number
+    }
+    licenses: {
+      // columns
+      id: number
+      created_at: string
+      updated_at: string | null
+      key: string
+      email: string
+      plan: "monthly" | "yearly" | "lifetime"
+      status: string
+      stripe_customer_id: string
+      stripe_subscription_id: string
+      stripe_checkout_session_id: string
+      current_period_end: number
+      checked_at: number
     }
     logs: {
       // columns
@@ -1366,6 +1395,27 @@ declare module '@stacksjs/database' {
       description: string | null
       created_at: string | null
       updated_at: string | null
+    }
+    runs: {
+      // columns
+      id: number
+      created_at: string
+      updated_at: string | null
+      chat_guid: string
+      message_guid: string
+      prompt: string
+      cwd: string
+      status: "queued" | "running" | "done" | "failed" | "stopped"
+      reply: string
+      error: string
+      session_id: string
+      cost_cents: number
+      duration_ms: number
+      last_activity: string
+      started_at: number
+      finished_at: number
+      engine: "claude" | "codex"
+      conversation_id: number
     }
     sender_domains: {
       // columns
