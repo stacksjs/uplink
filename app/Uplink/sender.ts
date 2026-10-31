@@ -75,6 +75,9 @@ const TIMED_OUT = /-1712|timed out/i
 /** Long enough for someone to read the macOS prompt and click Allow. */
 const PROBE_TIMEOUT_MS = 60_000
 
+/** A real send is one Apple event; if it takes this long, nothing is listening. */
+const SEND_TIMEOUT_MS = 45_000
+
 export class AppleScriptSender implements Sender {
   async canSend(): Promise<AutomationState> {
     try {
@@ -107,9 +110,20 @@ export class AppleScriptSender implements Sender {
   async send(target: ReplyTarget, text: string): Promise<void> {
     const proc = Bun.spawn(
       ['osascript', '-e', SCRIPT, text, target.chatGuid, target.handle, target.service === 'SMS' ? 'SMS' : 'iMessage'],
-      { stdout: 'ignore', stderr: 'pipe' },
+      { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' },
     )
+    // A Messages that is hung, or waiting on a dialog nobody is there to
+    // click, never answers. Replies are sent from the poll loop, so without a
+    // limit one stuck send stops every thread from hearing anything again.
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      proc.kill()
+    }, SEND_TIMEOUT_MS)
     const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
+    clearTimeout(timer)
+    if (timedOut)
+      throw new Error(`Messages did not accept the reply within ${SEND_TIMEOUT_MS / 1000}s. It may be waiting on a dialog on the Mac.`)
     if (code !== 0)
       throw new Error(`Messages refused to send (osascript exit ${code}): ${stderr.trim()}`)
   }
