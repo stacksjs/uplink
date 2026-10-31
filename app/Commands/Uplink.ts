@@ -2,6 +2,7 @@ import type { EngineId } from '../Uplink/engine'
 import { copyFileSync, existsSync, watch } from 'node:fs'
 import process from 'node:process'
 import { defineCommand } from '@stacksjs/cli'
+import { craftBinary } from '../Desktop/craft'
 import { loadConfig } from '../Uplink/config'
 import { checksPass, runChecks, writeHeartbeat } from '../Uplink/doctor'
 import { ENGINE_IDS, isEngineId } from '../Uplink/engine'
@@ -278,7 +279,7 @@ export default defineCommand((cli) => {
         )
       }
 
-      step(['./buddy', 'build:desktop'], { CRAFT_BIN: `${appDir}/pantry/.bin/craft` })
+      step(['./buddy', 'build:desktop'], { CRAFT_BIN: craftBinary(appDir) })
       step(['./buddy', 'build:dmg'], {
         DESKTOP_APP_NAME: 'Uplink',
         DESKTOP_BUNDLE_ID: 'com.stacksjs.uplink',
