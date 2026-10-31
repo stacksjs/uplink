@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ClaudeEngine, summarizeTool } from '../../../app/Uplink/engine'
 import { chunk, toPlainText } from '../../../app/Uplink/format'
+import { killTree } from '../../../app/Uplink/process-tree'
 import { detectWorkdir } from '../../../app/Uplink/workdir'
 
 const dir = mkdtempSync(join(tmpdir(), 'uplink-engine-'))
@@ -99,6 +100,27 @@ describe('format', () => {
     expect(chunk(text, 40)).toEqual(['First paragraph here.', 'Second paragraph is a bit longer than', 'the first one.'])
     for (const part of chunk('x'.repeat(250), 100))
       expect(part.length).toBeLessThanOrEqual(100)
+  })
+
+  it('never cuts an emoji in half when there is no boundary to use', () => {
+    // 49 letters then a 2-code-unit emoji: a cut at 50 would split it.
+    const text = `${'x'.repeat(49)}\u{1F6F0}${'y'.repeat(60)}`
+    const parts = chunk(text, 50)
+    expect(parts.join('')).toBe(text)
+    for (const part of parts)
+      expect(part).not.toMatch(/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/)
+  })
+})
+
+describe('killTree', () => {
+  it('follows SIGTERM with SIGKILL for an agent that ignores it', async () => {
+    const proc = Bun.spawn(['sh', '-c', 'trap "" TERM; while :; do sleep 1; done'], { detached: true, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+    await Bun.sleep(150) // the trap has to be installed before the signal
+    killTree(proc, 200)
+    const started = Date.now()
+    const code = await Promise.race([proc.exited, Bun.sleep(5000).then(() => 'still running')])
+    expect(code).not.toBe('still running')
+    expect(Date.now() - started).toBeGreaterThanOrEqual(150)
   })
 })
 

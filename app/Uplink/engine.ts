@@ -2,6 +2,7 @@ import type { Subprocess } from 'bun'
 import { tmpdir } from 'node:os'
 import process from 'node:process'
 import { truncate } from './format'
+import { killTree } from './process-tree'
 
 /**
  * Runs a prompt through Claude Code in headless mode (`claude -p`).
@@ -218,18 +219,11 @@ export class ClaudeEngine implements Engine {
       detached: true,
     })
 
-    const killTree = (): void => {
-      try {
-        process.kill(-proc.pid, 'SIGTERM')
-      }
-      catch {
-        proc.kill('SIGTERM')
-      }
-    }
+    const stopTree = (): void => killTree(proc)
 
     const timer = setTimeout(() => {
       timedOut = true
-      killTree()
+      stopTree()
     }, this.options.timeoutMs)
 
     const done = (async (): Promise<EngineResult> => {
@@ -308,7 +302,7 @@ export class ClaudeEngine implements Engine {
       done,
       cancel: () => {
         cancelled = true
-        killTree()
+        stopTree()
       },
     }
   }

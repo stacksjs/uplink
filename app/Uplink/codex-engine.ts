@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 import { binaryExists, PROBE_TIMEOUT_MS } from './engine'
 import { truncate } from './format'
+import { killTree } from './process-tree'
 
 /**
  * Runs a prompt through the OpenAI Codex CLI in its non-interactive mode
@@ -144,15 +145,9 @@ export class CodexEngine implements Engine {
     const lastMessageFile = join(tmpdir(), `uplink-codex-${randomUUID()}.txt`)
 
     let proc: Subprocess<'ignore', 'pipe', 'pipe'> | null = null
-    const killTree = (): void => {
-      if (!proc)
-        return
-      try {
-        process.kill(-proc.pid, 'SIGTERM')
-      }
-      catch {
-        proc.kill('SIGTERM')
-      }
+    const stopTree = (): void => {
+      if (proc)
+        killTree(proc)
     }
 
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -174,13 +169,13 @@ export class CodexEngine implements Engine {
 
       // Cancelling before the process existed still has to take effect.
       if (cancelled) {
-        killTree()
+        stopTree()
         return failure('Stopped.', request.sessionId ?? null, Date.now() - started)
       }
 
       timer = setTimeout(() => {
         timedOut = true
-        killTree()
+        stopTree()
       }, this.options.timeoutMs)
 
       let sessionId = request.sessionId ?? null
@@ -283,7 +278,7 @@ export class CodexEngine implements Engine {
       done,
       cancel: () => {
         cancelled = true
-        killTree()
+        stopTree()
       },
     }
   }

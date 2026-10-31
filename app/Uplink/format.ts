@@ -41,7 +41,7 @@ export function chunk(text: string, max: number): string[] {
       ?? lastBoundary(window, '\n')
       ?? lastBoundary(window, '. ')
       ?? lastBoundary(window, ' ')
-      ?? max
+      ?? hardCut(window, max)
     parts.push(rest.slice(0, cut).trim())
     rest = rest.slice(cut).trim()
   }
@@ -49,6 +49,16 @@ export function chunk(text: string, max: number): string[] {
   if (rest)
     parts.push(rest)
   return parts
+}
+
+/**
+ * Where to cut a window that has no boundary worth using (a long URL, a hash).
+ * Never between the halves of a surrogate pair: an emoji cut in two is two
+ * replacement characters on the phone, and each half goes out as its own text.
+ */
+function hardCut(window: string, max: number): number {
+  const last = window.charCodeAt(max - 1)
+  return max > 1 && last >= 0xD800 && last <= 0xDBFF ? max - 1 : max
 }
 
 function lastBoundary(window: string, separator: string): number | null {
