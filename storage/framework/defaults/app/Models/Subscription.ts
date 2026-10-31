@@ -1,5 +1,5 @@
 import { defineModel } from '@stacksjs/orm'
-import { schema } from '@stacksjs/validation'
+import { schema } from '@stacksjs/validation/runtime'
 
 export default defineModel({
   name: 'Subscription', // defaults to the sanitized file name
@@ -8,6 +8,9 @@ export default defineModel({
   autoIncrement: true, // defaults to true
   belongsTo: ['User'],
   traits: {
+    // So a fresh seed fills its dashboard page (stacksjs/stacks#3000).
+    useSeeder: { count: 10 },
+    gdpr: { erasure: 'keep', basis: 'legal_obligation', purpose: 'Billing records' },
     useUuid: true,
   },
   attributes: {

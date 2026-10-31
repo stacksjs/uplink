@@ -1,6 +1,6 @@
 import type { Attributes } from '@stacksjs/types'
 import { defineModel, formatDate } from '@stacksjs/orm'
-import { schema } from '@stacksjs/validation'
+import { schema } from '@stacksjs/validation/runtime'
 
 function receiptTimestamp(value: unknown): string {
   if (typeof value === 'number')
@@ -136,6 +136,7 @@ export default defineModel({
       order: 8,
       fillable: true,
       default: '{}',
+      type: 'text',
       validation: {
         rule: schema.string(),
       },
