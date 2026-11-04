@@ -133,6 +133,13 @@ Write `app/Desktop/launcher.ts` and `build:desktop` compiles that instead, the
 same way anything under `app/` overrides its framework default. `DESKTOP_URL`
 and `APP_URL` then become optional, because the launcher decides what to open.
 
+Every launcher, the framework's or yours, compiles through
+`desktopLauncherCompileArgs()` to bytecode as an ES module: parsing the bundle
+was most of a launcher's start (Browser's agent reached its window host in
+379 ms as source, 146 ms as bytecode), for an executable about a quarter
+larger. Pass `bytecode: false` only to compare. Compile any helper binary of
+your own with the same function rather than hand-written `bun build` flags.
+
 ```ts
 // app/Desktop/launcher.ts - compiled to Contents/MacOS/<AppName>
 import { dirname, join } from 'node:path'
@@ -252,9 +259,99 @@ Two things that bite, both silently:
 `buddy build:dmg` warns when a finished bundle contains more than one
 Bun-compiled executable, naming them and what the repetition costs.
 
+## Native macOS apps (`config/desktop.ts`)
+
+A project whose app is a client of an HTTP API (a hosted service, not a local server) declares it in
+`config/desktop.ts`, the way `config/mobile.ts` declares a phone app, and `buddy build:desktop` builds a
+native AppKit app from its stx screens: no web view, no launcher.
+
+```ts
+import type { DesktopConfig } from '@stacksjs/types'
+
+export default {
+  macos: {
+    appName: 'Library',
+    bundleId: 'com.example.library',
+    teamId: '3JJRNQW6B7',                 // not a secret
+    url: process.env.LIBRARY_API_URL || 'http://127.0.0.1:3408',
+    nativeScreens: ['Main', 'Settings'],   // resources/native/<name>.stx
+    shareStorage: { auth_token: 'auth.token' },
+    window: { width: 1180, height: 760, minWidth: 860, minHeight: 540 },
+    icon: 'resources/native/icon/AppIcon-1024.png',
+    privacy: { tracking: false, collectedDataTypes: [] },
+  },
+} satisfies DesktopConfig
+```
+
+- `buddy build:desktop` compiles the screens (`compileNativeBundle`), builds Craft's AppKit host
+  (`craft-native/macos`, cached per Craft revision), lays out `<App>.app` and signs it ad hoc. `buddy dev:desktop`
+  does the same and opens it. Output: `storage/framework/desktop/macos/`.
+- The toolchain is not the app's business: Craft resolves the pinned Zig through Pantry and fetches and builds the pinned
+  zig-js into `~/.cache/craft/toolchain` (`CRAFT_TOOLCHAIN_DIR` moves it, `CRAFT_ZIG` overrides the compiler).
+- The host reads `Contents/Resources/craft-app.json` (written by the build) when Finder launches it, so the app has no
+  arguments. The API origin is `url`, and `craft.secureStorage` is the Keychain (`craft.session` is the `auth.token` item).
+- `buddy desktop:apple:package` and `publish` build the same bundle for the Mac App Store (sandbox, network client,
+  application identifier, Keychain group, embedded profile). Name, bundle id, team, version, category and icon come
+  from `config/desktop.ts`; only the credentials (identities, profile, API key) are Apple variables. `--universal` is not
+  supported for native apps yet.
+- A `macos` section in `config/desktop.ts` switches `build:desktop` and `dev:desktop` to this path; without one they
+  build the Craft web-view app as before.
+- One set of views can be both: the web server resolves the native primitives (`View`, `Text`, `ScrollView`, ...) as
+  components of last resort (stx config `nativePrimitives`), so `resources/views` pages written with them are also native
+  screens. Menus, windows and the Keychain are the screen's `craft.desktop` and `craft.secureStorage`.
+
+### An app that runs its own API (`macos.agent`)
+
+A local-first app (a browser, an inbox, anything whose data is this Mac) runs the project's routes inside the
+app instead of talking to a hosted server. `buddy new <name> --desktop` scaffolds one (combinable with
+`--minimal`, and happy to scaffold into a directory that holds only `.git`):
+
+```ts
+export default {
+  macos: {
+    appName: 'Browser',
+    bundleId: 'com.example.browser',
+    agent: true,                     // or { port, entry, appRoutes, staticDir, resources }
+    nativeScreens: ['Main'],
+    webkit: true,                    // link WebKit into the host, for <WebView>
+    defaultBrowser: true,            // http/https URL types, HTML/XHTML/webarchive/PDF document types
+    permissions: { camera: true, microphone: 'For calls in web pages.', location: true, downloads: true, printing: true },
+    dockMenu: [{ title: 'New Window', action: 'new-window' }],
+  },
+} satisfies DesktopConfig
+```
+
+- The agent (`@stacksjs/desktop-build` `startDesktopAgent`, `src/agent.ts`) is `Bun.serve` on 127.0.0.1, on the
+  port remembered in `~/Library/Application Support/<App>/agent.port` (any free port when it is taken). The host fetches
+  `GET /native/session` and gets an HttpOnly, SameSite=Strict cookie holding a token minted for this launch; every other
+  request needs that cookie and a Host header of `127.0.0.1:<port>` or `localhost:<port>`, so a DNS-rebinding page
+  cannot call it. `url` is not needed.
+- It serves the app's routes in process: `routes/` as `app/Routes.ts` mounts them, plus the agent's own module
+  (`app/Desktop/Agent.ts` by convention, `agent.entry` otherwise). Routes the agent module adds are not prefixed. A
+  default-exported `(request) => Response` there replaces the router entirely.
+- `buddy dev:desktop` runs the launcher from source in the project (`bun`, no bundle), which boots the routes as
+  `buddy dev:api` does. `buddy build:desktop` compiles the launcher into `<App>.app/Contents/MacOS/<App>`, with the host
+  beside it as `craft-runtime` and `desktop-agent.json` in Resources. A compiled binary cannot import route files off
+  disk (the router refuses), so the build imports the registry's route files, the agent module and every
+  `'Actions/...'` they name statically (`provideActions`); what they import travels inside the app.
+- A compiled agent has no `node_modules`, so a package that reads data files beside its own modules (rule lists, a
+  word list) finds nothing. Name them in `agent.resources`, `{ lists: 'node_modules/some-lib/data' }`: the build copies
+  each into `Contents/Resources/<name>`, and a route finds it with `desktopResource('lists')` from
+  `@stacksjs/desktop-build`, which under `buddy dev:desktop` is the path in the project. A route can pass that to the
+  package (`{ dir: desktopResource('lists') }`). Names are plain file names, not `web` or the files the build writes.
+- The launcher (`src/agent-launcher.ts`) holds a single-instance lock (`agent.pid`), logs to
+  `~/Library/Logs/<App>.log` when launched without a terminal, and quits with the window.
+- Entitlements: the Bun executable gets `allow-jit`, `allow-unsigned-executable-memory` and
+  `disable-library-validation`; in the sandbox the agent adds `network.server`, and the host is signed with only
+  `app-sandbox` and `inherit`. `permissions` adds each device entitlement and its `NS*UsageDescription` (an explicit
+  `usageDescriptions` entry wins).
+- `webkit` needs a craft-native whose `buildMacOSNative` takes `webkit`; the build checks Craft's source and fails by
+  name rather than building a host with blank web views. `dockMenu` reaches the host through `craft-app.json`.
+
 ## CLI Commands
 
 ```bash
+buddy new <name> --desktop     # a Stacks app that is also a native Mac app, API inside (macos.agent)
 buddy dev:desktop              # start the desktop development server
 buddy build:desktop            # build the launcher + Craft runtime payload
 buddy desktop:apple:init       # generate the reusable GitHub Actions caller
@@ -263,6 +360,22 @@ buddy desktop:apple:package    # build, sandbox, sign, and create a Store .pkg
 buddy desktop:apple:publish    # validate or upload the package to App Store Connect
 buddy desktop:probe            # measure what a Craft window offers interactive/game content
 ```
+
+A TestFlight release from the developer's Mac needs only the App Store Connect
+key (`APP_STORE_CONNECT_API_KEY*`, encrypted in `.env.production`):
+
+```bash
+APP_ENV=production buddy desktop:apple:publish --build-number next --testflight 'My Team'
+```
+
+`--build-number next` asks App Store Connect for the app's highest build and
+uses one more, so every upload is `<version> (n + 1)` with no counter kept
+anywhere. `--testflight` waits for processing, gives the build to the named beta
+groups (they must already exist; an automatic-distribution internal group gets it
+without an explicit add), and sets "What to Test" from `--whats-new` or the
+commit subjects since the last tag. Signing identities not named by a variable
+are read from the keychain for the team, and a missing
+`APPLE_PROVISIONING_PROFILE` is downloaded from App Store Connect.
 
 `desktop:probe` opens a visible Craft window (not `--headless`, which stops
 requestAnimationFrame) and measures WebGL2/WebGPU, frame pacing under load,

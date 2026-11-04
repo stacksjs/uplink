@@ -86,6 +86,9 @@ buddy build --server --verbose --project [name]
 
 ## Standard Build Pattern
 
+For workspace dependency ordering, failure propagation and umbrella builds, read
+[the build package's workspace contract](../../../../core/build/README.md#workspace-builds).
+
 For a library barrel or a package with public subpaths, preserve the module
 graph with the shared transpiler. Identifier-minifying bundles have produced
 invalid re-export bindings on supported Bun versions. Separate bundles also
@@ -150,6 +153,26 @@ Packages build in `storage/framework/libs/packages/<dir>/`, where `<dir>` is
 the unscoped npm name unless the entry sets `dir`. The whole directory is
 generated and gitignored.
 
+`libs:publish` sends each package to the Pantry registry with `pantry publish`,
+and refuses when pantry is not on PATH. A package that apps install with Bun or
+npm sets `registry: 'npm'`, which publishes with `pantry publish --npm`, or with
+`bun publish` / `npm publish` where pantry is not installed.
+Each package publishes its own `readme` (a project-relative Markdown file) as
+README.md, or a short one the build writes from its `description`.
+
+A package build compiles TypeScript and nothing else, so generated data (JSON,
+scripts, lists) ships through `assets`: `{ 'path/in/package': 'project/source' }`,
+copied into `dist/` after the compile. A path with an extension is a file and
+gets an exact export; any other path is a directory whose contents are exported
+as `<name>/<path>/*` (never `<name>/<path>` itself, which would shadow a module
+of the same name). Code reads them with `new URL('./<path>/…', import.meta.url)`.
+`prebuild` is a shell command run in the project root before the package
+builds, so the assets are regenerated rather than shipped stale:
+
+```ts
+{ name: 'my-blocker', include: ['webkit.ts'], prebuild: 'buddy extension:build --target webkit', assets: { webkit: 'dist-webkit' } }
+```
+
 ### Things that will stop a build, on purpose
 
 - **A package that matches no files.** Nearly always a typo'd glob, and the
@@ -157,6 +180,8 @@ generated and gitignored.
   packages instead, so an app that never filled in `resources/` is not blocked.
 - **Two packages that resolve to the same directory** (`@acme/ui` and
   `@other/ui` both unscope to `ui`). Give one an explicit `dir`.
+- **A missing asset, or a failed `prebuild`.** Publishing the previous output
+  of a step that just failed is how a stale package ships.
 - **stx ambient globals in a `functions` package.** `state`, `useDark` and the
   rest are injected into an stx page entry and exported by nothing, so a
   bundled copy compiles and then throws `ReferenceError` on the consumer's

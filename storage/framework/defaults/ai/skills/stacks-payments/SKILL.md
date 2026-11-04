@@ -164,6 +164,12 @@ refund), so every call acts as the account with `asAccount(id)` (the
 `Stripe-Account` header). Stripe's fees are the merchant's; webhooks for it
 arrive on the **Connect** endpoint with `event.account` set.
 
+`connectedCustomer(user, account)` reuses a customer on the account only when
+its `stacks_user_id`, email and `stacks_install` mark (an HMAC of the app key,
+`connectInstallFingerprint()`) all match, since local ids repeat across
+databases that share an account. An unmarked older customer is adopted on a
+matching email and then marked; anything else gets a new customer.
+
 ```typescript
 import { asAccount, checkoutLineItemsTotal, connectedCustomer, connectRefund, directCheckout, directCheckoutPaymentData, directSubscriptionParams, manageDirectSubscription } from '@stacksjs/payments'
 
@@ -711,8 +717,10 @@ when the app declares no portal.
 
 ```typescript
 Payment.formatAmount(2999, 'usd')   // '$29.99' (uses Intl.NumberFormat)
-Payment.toCents(29.99)               // 2999
-Payment.toDollars(2999)              // 29.99
+Payment.formatAmount(1000, 'jpy')   // '¥1,000': JPY has no minor unit
+Payment.minorUnitExponent('jpy')    // 0 (Stripe's table on the Stripe driver; ISO 4217 otherwise)
+Payment.toCents(29.99)               // 2999, two-decimal currencies only
+Payment.toDollars(2999)              // 29.99, two-decimal currencies only
 ```
 
 ### Client-Side Billing (useBillable)
@@ -912,7 +920,7 @@ The instance methods are exactly the keys of `createBillableMethods` in
   its original raw payload before applying domain events.
 - Stripe API keys MUST be in `.env` as `STRIPE_SECRET_KEY` and `STRIPE_PUBLISHABLE_KEY` -- never hardcode them in config files
 - The Stripe client is created lazily, on first use: importing `@stacksjs/payments` without `STRIPE_SECRET_KEY` (or without the opt-in `stripe` package) is fine, and the first Stripe call throws naming what is missing
-- All amounts are in cents -- use `toCents()` and `toDollars()` for conversion
+- All amounts are in the currency's minor unit, and which minor unit depends on the API. A provider-neutral `Money` (the driver, the billable trait's `createPayment()`/`charge()`/`refund()`, webhook `PaymentEvent.amount`) is in ISO 4217 minor units, as commerce stores them: whole krónur for ISK, hundredths for MGA. The Stripe driver converts to Stripe's units, which differ for ISK, UGX (two decimals) and MGA (none), with `toStripeAmount()` and `fromStripeAmount()`, and refuses a fraction of an ariary. The Stripe-shaped APIs (`manageCharge`, Connect, direct debit, product setup) and `formatAmount()` take Stripe's units: cents for USD, whole yen for JPY, hundredths for ISK and UGX. `toCents()` and `toDollars()` are for two-decimal currencies; `minorUnitExponent(currency)` says how many decimals a Stripe amount has
 - `Payment.charge()` (Stripe driver) creates AND confirms the PaymentIntent in one step
 - `subscribe()` resolves the price via `lookup_key`, not a direct Stripe price ID
 - `Payment.removePaymentMethod()` and the billable instance method `removePaymentMethod()` both take the provider's id (string); `managePaymentMethod.deletePaymentMethod()` takes the local row id (number)

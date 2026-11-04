@@ -135,6 +135,39 @@ export default {
 } satisfies MobileConfig
 ```
 
+### Launch screen
+
+Every app gets a launch splash without configuring one. `buddy build:ios` and
+`build:android` render the app icon with ts-images' splash preset
+(`generateMobileSplash` in `@stacksjs/image`) on `backgroundColor`, plus a
+Dark Mode set on `backgroundColorDark` when the app gives one. iOS gets
+`LaunchLogo.png` at @1x/@2x/@3x; Android gets Android 12's splash icon and
+the logo older versions centre on the window, per density. The mark is drawn
+at its size in points, never as a full-screen picture, so no screen shape
+crops it, and Craft holds it until the first frame on the same colour. Files
+land in `storage/framework/mobile/splash/<platform>`, rebuilt each build.
+
+`ios.splash` and `android.splash` take the same options:
+
+```ts
+splash: {
+  logo: 'public/logo.svg', // default appIcon, masked to rounded corners
+  logoDark: 'public/logo-dark.svg',
+  text: 'My App', font: 'resources/fonts/Barlow-Regular.ttf', uppercase: true,
+  accent: '#dd0f15', // the glow; default ios.tintColor, false for none
+  size: 96, // optical size in points
+  shape: 'none', // 'rounded' | 'circle' to mask a full-bleed square
+},
+```
+
+`ios.splash.image` / `imageDark` is a hand-made launch image, used as it is
+(PNG, PDF or SVG at its own size in points; a PNG may have `@2x`/`@3x`
+beside it). It is iOS-only. `splash: false` leaves only the colour. The
+generated splash needs craft-native 0.0.443 or later; with an older Craft the
+build warns and the launch screen shows only the colour (a hand-made image
+still works). A white logo on a white background is repainted dark so it
+stays visible; give `backgroundColor` to set the colour instead.
+
 For the native renderer, every app-owned route must map to an STX screen in
 `nativeScreens` on both platforms. The example maps `/m/` to
 `resources/components/Home.stx`; browser routes should render that same shared
@@ -153,6 +186,24 @@ For the web renderer, choose a primary content source:
 
 Only enable capabilities the product uses. Craft turns enabled capabilities
 into native bridge availability and required iOS privacy descriptions.
+
+`capabilities.shakeGesture` arms the accelerometer while the app is in front,
+on iOS and Android, and sends the page Craft's `shake` event (with its `force`
+in g) once per deliberate shake. It needs craft-native 0.0.435 or later, and
+the build refuses an older one rather than shipping a gesture that does
+nothing.
+
+`capabilities.wallet` lets a native screen add a pass through stx's
+`craft.wallet`: `add({ data })` with a base64 `.pkpass` or `add({ url })` with
+an https URL on iOS, an https Google Wallet save URL on Android. On iOS
+`craft.wallet.has(serialNumber)` cannot find a pass yet: Craft adds no
+pass-type entitlement, and iOS shows an app only the passes its entitlement
+covers. `android.capabilities.healthServices` runs a native screen's
+`craft.health.startWorkout()`, `pauseWorkout()`, `resumeWorkout()` and
+`endWorkout()` through Health Services; it needs `android.minSdk` 30, which
+Craft sets when the app leaves it unset. Native passkeys are not offered yet:
+Craft's iOS host has them, and a native screen has nothing to call them with
+until stx's native runtime does (stacksjs/stx#2151).
 
 The shell's behaviour around the page defaults to a native app's; set only
 what should differ: `swipeBack` (`'router'`, the stx router's interactive

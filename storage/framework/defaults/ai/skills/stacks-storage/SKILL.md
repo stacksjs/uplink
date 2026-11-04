@@ -291,6 +291,14 @@ const local = createLocalStorage({ root: './storage' })
 - MIME type detection is extension-based (supports txt, html, css, js, json, xml, pdf, zip, jpg, jpeg, png, gif, svg, mp4, mp3, wav)
 - `list()` returns an async iterable; supports `deep: true` for recursive listing
 
+### Memory adapter stream lifecycle
+
+A move to the same normalized path is a no-op for an existing file, preserving
+bytes, visibility and modification time. A missing source still throws.
+`putStream` aborts pending reads promptly, cancels the reader and never publishes
+partial contents. Stream writes release reader locks on success, failure and
+abort. Existing destination contents survive a failed or aborted upload.
+
 ### S3 Adapter (`S3StorageAdapter`)
 
 ```typescript
@@ -601,6 +609,13 @@ const files = getFiles('dir/')  // all files recursively
 const files = getFiles('dir/', ['node_modules'])  // with exclusions
 deleteFiles('dir/', ['keep.txt'])  // delete all except exclusions
 ```
+
+Recursive deletion unlinks symlinks, including an explicit symlink root, without
+traversing their targets. Listing skips root and descendant symlink entries and cycles. Symlink ancestors
+below the longest cwd/temp anchor reject; platform aliases above it are accepted.
+Exclusions protect paths.
+Config updates copy own enumerable entries and preserve `__proto__` as data;
+inherited fields/getters are not read.
 
 ### Config File Helper
 

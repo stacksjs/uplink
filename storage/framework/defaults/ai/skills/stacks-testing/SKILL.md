@@ -24,11 +24,21 @@ before deciding what to test, and this one for how.
 ## Test Setup
 
 ```typescript
-import { setupTestEnvironment } from '@stacksjs/testing'
-import { refreshDatabase, setupDatabase, truncateMysql, truncateSqlite } from '@stacksjs/testing/database'
+// tests/setup.ts, the bunfig [test] preload
+import { bootTestEnvironment } from '@stacksjs/testing'
 
-// Set NODE_ENV and APP_ENV to 'test'
-setupTestEnvironment()
+// NODE_ENV/APP_ENV = 'test', then the server auto-imports (models, jobs,
+// Action, route, response, ...), app listeners and gates
+await bootTestEnvironment()
+```
+
+`bun test` never runs the framework preloader, so this is what makes the
+auto-imported names exist in a test. Without it, loading an action written
+without imports throws "Action is not defined". `setupTestEnvironment()` still
+exists and only sets the env.
+
+```typescript
+import { refreshDatabase, setupDatabase, truncateMysql, truncateSqlite } from '@stacksjs/testing/database'
 
 // MySQL database setup; this helper does not initialize SQLite
 await setupDatabase()
@@ -154,6 +164,8 @@ The lightweight root also exports:
   the real mail singleton through the capture driver and restore automatically.
 - `freezeTime`, `travelTo`, `useRealTime`. Explicitly register
   `afterEach(useRealTime)`; frozen time is not restored implicitly.
+  Standalone Bun fixtures import these from `@stacksjs/testing/time` and
+  restore the clock in `finally`; this subpath imports no lifecycle hooks.
 - `command(args)` returns an awaitable child-process builder with `withInput`,
   `withEnv`, `withCwd` and `withTimeout`. Assert exitCode/output/timedOut. Run
   file-writing commands in a disposable fixture project using `withCwd`.
@@ -180,7 +192,11 @@ module for the rest of that run, so a mock in one file leaks into the next. A
 framework booted against one database also stays booted. When a test needs a
 clean process, run it in a child (`src/isolated.ts`); when it needs real rows,
 give it a database nobody else uses (`src/disposable-database.ts`). Both are on
-the root, with no framework import.
+the root, with no framework import. For direct PostgreSQL queries, use
+`new SQL(database.sqlOptions!)`: Bun can let an inherited `PGDATABASE` override
+a URL's database name. The helper's explicit SQL options select its owned
+database. Pass `database.env` last to isolated children; it supplies matching
+`DB_*`, `PG_*`, `POSTGRES_URL` and `DATABASE_URL` values.
 
 ```ts
 import { assertIsolatedOk, disposablePostgresUrl, runIsolated, test, withDisposableDatabase } from '@stacksjs/testing'
@@ -203,7 +219,10 @@ for (const dialect of ['sqlite', 'postgres'] as const) {
 - `runIsolated(file, { env, timeoutMs = 60_000, args, cwd, mode, preload, bunfig, envFile, inheritEnv, stdin })`
   resolves `{ code, signal, stdout, stderr, timedOut, durationMs, command }`. `mode: 'auto'` runs
   `*.test.*` / `*.spec.*` with `bun test`, anything else as a script; `env` values of `undefined`
-  remove a variable. The watchdog sends SIGTERM at the timeout and SIGKILL 2 s later.
+  remove a variable. Native ownership disposes the command and normally inherited descendants
+  before returning, including after a normal early command exit. POSIX uses an anchored group
+  with SIGTERM then SIGKILL after 2 seconds; Windows uses a parent-held Job Object and confirms
+  zero active members. Deliberate POSIX breakaway is outside this lifecycle contract.
 - `bunfig: 'path/bunfig.toml'` runs the child with that config (`--config=`), resolved against
   `cwd`; it must exist. `preload` instead generates a config holding only those preloads. They are
   exclusive (a TypeError): list the preloads in your bunfig. Bun resolves a bunfig's relative
@@ -276,7 +295,11 @@ expect(pageAuditClean(report)).toBe(true) // no duplicate /api/ requests, failed
   pattern holds with no listener stays held (a hanging request on purpose).
   `matchesUrlPattern(pattern, url)` and `pausedRequestMatches(pattern, paused)` are Chrome's
   matching rules (`*`, `?`, `\` escape; stage and resource type).
-- `settle(cdp, { quietMs, timeoutMs })` resolves false (not throws) when a page never goes quiet.
+- `settle(cdp, { quietMs, timeoutMs, includeSpeculative? })` resolves false (not throws) when a page never goes quiet.
+  By default all finite requests count. `includeSpeculative: false` uses `cdp.foregroundInFlight`,
+  excluding only Chrome `Prefetch` requests and explicit `Purpose` / `Sec-Purpose: prefetch`
+  declarations. The raw `inFlight` map and all HTTP, duplicate API, console and runtime audit
+  failures remain observable. `navigate` and `auditPage` accept the same option.
 - `click(cdp, selector | { selector, text }, { timeoutMs? })` scrolls the unique target into view,
   waits for layout, enabled state and an unobscured hit test, then uses Chrome's real mouse input.
   Use it for journey controls instead of local coordinate-click helpers or DOM-dispatched clicks.

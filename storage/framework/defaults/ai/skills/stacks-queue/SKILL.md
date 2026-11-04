@@ -59,6 +59,13 @@ export class Job {
 ```
 
 ### Dispatch Routing
+
+Production defaults to the database driver. An explicit `sync` driver in production
+throws; reserved/unknown drivers also throw. `resolveQueueDriver()` shares this
+policy across both dispatch APIs and workers. For a transactional database job
+intent, `storeJob` from `@stacksjs/queue/utils` inserts immediately on the active
+transaction; its consumer is the normal database queue worker, including retries.
+
 1. Checks `isFaked()` -- if testing, dispatches to FakeQueue
 2. `sync` driver: calls `dispatchNow()` (immediate execution)
 3. `redis` driver: creates `RedisQueue`, calls `queue.add()` with bun-queue options
@@ -548,7 +555,7 @@ await SendWelcomeEmail.dispatchNow({ email, name })        // bypass queue
 ## config/queue.ts
 ```typescript
 {
-  default: 'sync',  // implemented dispatch drivers: sync | database | redis
+  default: env.QUEUE_DRIVER || (env.APP_ENV === 'production' ? 'database' : 'sync'),  // sync | database | redis
   connections: {
     sync: { driver: 'sync' },
     database: { driver: 'database', table: 'jobs', queue: 'default', retryAfter: 90 },

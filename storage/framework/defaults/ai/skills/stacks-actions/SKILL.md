@@ -1,6 +1,6 @@
 ---
 name: stacks-actions
-description: Use when working with Stacks server actions - creating actions in app/Actions/, auto-generated API actions from the useApi model trait, the 673 default framework actions (auth, dashboard, commerce, content, deployment, jobs), action request/response handling, or action registration. Covers @stacksjs/actions and storage/framework/defaults/app/Actions/.
+description: Use when working with Stacks server actions - creating actions in app/Actions/, auto-generated API actions from the useApi model trait, the 675 default framework actions (auth, dashboard, commerce, content, deployment, jobs), action request/response handling, or action registration. Covers @stacksjs/actions and storage/framework/defaults/app/Actions/.
 license: MIT
 compatibility: Bun >= 1.3.0, TypeScript
 allowed-tools: Read Edit Write Bash Grep Glob
@@ -20,7 +20,7 @@ Server actions are reusable business logic units invoked from routes, events, or
 
 ```typescript
 // app/Actions/CreateWidget.ts
-import { Action } from '@stacksjs/actions'
+import { Action } from '@stacksjs/actions/runtime'
 import { toSnakeCaseKeys } from '@stacksjs/orm'
 import { response } from '@stacksjs/router'
 
@@ -57,7 +57,7 @@ the rules used by an explicit `request.validate()` call; do not assume attaching
 a model means every custom handler has already validated all its input.
 
 ```ts
-import { Action } from '@stacksjs/actions'
+import { Action } from '@stacksjs/actions/runtime'
 import { schema } from '@stacksjs/validation'
 
 export default new Action({

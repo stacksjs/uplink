@@ -112,6 +112,9 @@ is rejected because multiplexed application actions can handle it as a write.
 `requestImpersonation()` exposes trusted actor/subject metadata; ORM trails
 attribute writes to the original actor. `Auth.endImpersonation(credential)`
 requires the original actor request without the support header.
+Ordinary bearer lookups may be cached within a request. Viewed identities are
+never stored in that cache: each support-view resolution rechecks live authority
+and clears previously trusted support context before authenticating again.
 
 Store viewing state independently from the actor's login and cached profile,
 show a persistent disclosure and Exit control, disable offline persistence,
@@ -733,3 +736,40 @@ not authenticate them. OAuth resource endpoints must explicitly use
 `authorizeOAuthDelegatedToken` with the exact resource, audience, workspace and
 required scopes. Ordinary refresh also refuses delegated refresh credentials;
 use the OAuth token endpoint and the registered client's protocol authentication.
+
+### Userinfo and pairwise subjects
+
+The provider has no id_token. A relying party that signs people in with this
+provider reads `oauthUserInfoResponse(request, { scopes, resource, audience,
+workspaceId, isSubjectEligible, pairwiseSecret, claims })`: the same delegated
+token checks as any protected resource, then `{ ...claims, sub }`. `sub` comes
+from `pairwiseOAuthSubject(secret, clientId, subject)`, an HMAC that differs per
+client so two relying parties cannot join records on it; keep its secret apart
+from rotating app keys. `claims({ sub, subject, clientId, scopes })` releases
+only what the granted scopes cover, and null answers 401. The socials
+`StacksIssuerProvider` is the matching client.
+
+## Token-only recovery endpoints
+
+For high-entropy reset credentials, `mintPasswordResetToken()` returns `{ token, digest }`.
+Store the digest in `password_resets.token`, never the plaintext.
+Prefer `issuePasswordResetToken(email, { throttleMs?, expiresAt?, eligible? })` when
+issuing for an existing account. It locks that account before checking its current
+email, the synchronous application eligibility predicate and the saved throttle.
+It considers all supported legacy email-case variants when throttling, and retires
+them together when replacing the credential. `throttleMs: 0` disables throttling.
+It atomically replaces the digest and returns `{ issued: true, token, userId, email }`
+or `{ issued: false }`. The latter deliberately combines unknown, ineligible and
+throttled accounts; recovery endpoints must keep their public response generic.
+Only send the returned credential after issuance commits.
+Treat its value as opaque. It is bound to the issuing account, so reassigning an
+email address cannot let an old recovery reset the address's new account.
+`consumePasswordResetToken(token, async claim => { ... })` locks the owner and token,
+checks the stored expiry and consumes it in the same transaction as callback writes.
+`claim` is `{ userId, email, hasExplicitExpiry }`; result is `{ consumed: false }` or
+`{ consumed: true, value }`. Failures roll back the credential and account changes.
+Use database work only in the callback, and send notifications after commit.
+The credential is consumed before the callback, so it composes with
+`revokeAccountCredentials(claim.userId)`. That sweep also removes any pending
+password-reset links; changing a password must retire recovery credentials too.
+The existing `passwordResets(email)` flow supports email-addressed bcrypt tokens.
