@@ -87,8 +87,8 @@
     "docs:agent-counts:check": "./buddy docs:agent-counts:check"
   },
   "dependencies": {
-    "stacks": "^0.75.463",
-    "stripe": "^23.0.0"
+    "stacks": "^0.75.584",
+    "stripe": "^23.1.0"
   },
   "workspaces": [
     "storage/framework",
@@ -104,6 +104,6 @@
     "commit-msg": "bun x gitlint --edit \"$1\""
   },
   "devDependencies": {
-    "better-dx": "^0.2.24"
+    "better-dx": "^0.2.40"
   }
 }
