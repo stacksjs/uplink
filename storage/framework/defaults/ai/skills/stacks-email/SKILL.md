@@ -197,10 +197,13 @@ The source of truth for dashboard mail settings is `.env`:
 The dashboard endpoints are `GET` and `PUT` at
 `/api/dashboard/mail-settings`. They are guarded outside local development,
 return no stored secret values, preserve a secret when its input is blank, and
-require an explicit clear flag to remove one. Writes use the shared atomic
-environment-file service, create a machine-local backup under
-`storage/framework/runtime/dashboard/`, and reject stale revisions instead of
-overwriting concurrent edits.
+require an explicit clear flag to remove one. Reads and writes go through the
+environment-layers service: each value is read from, and saved to, the env
+file the app loads it from, so a key set in `.env.<env>` is edited there and
+not in `.env`. A mail key a later file holds encrypted beyond the server's
+reach is named on the page. Writes are atomic, keep a machine-local backup
+per file under `storage/framework/runtime/dashboard/`, and reject stale
+revisions instead of overwriting concurrent edits.
 
 ## Driver Interface
 
@@ -243,6 +246,27 @@ abstract class BaseEmailDriver {
   notifications: { newEmail: true, bounces: true, complaints: true }
 }
 ```
+
+### A mailbox from config, in one deploy
+
+Declare the address the app sends from and let the deploy make it:
+
+```typescript
+{
+  from: { name: 'Votescape', address: 'hello@votescape.org' },
+  domain: 'votescape.org',
+  mailboxes: ['hello'],
+  server: { enabled: true, generatePasswords: true },
+}
+```
+
+`buddy deploy` generates `MAIL_PASSWORD_HELLO` before the environment ships (saved encrypted to the environment file, never printed in CI), creates `hello@votescape.org` on the mail server with it, and publishes the mail DNS below. The SMTP driver signs in as `from.address` with that password, and with no `MAIL_HOST` set it uses `mail.<domain>` on port 587 with STARTTLS in production and staging (`ownMailHost` in `core/email/src/drivers/smtp.ts`); elsewhere the default stays loopback. Set `MAIL_MAILER=smtp` to send through the mailbox when the app is also connected to CommsHQ, which otherwise carries its mail.
+
+### Mail through CommsHQ, and a service that relays
+
+An app connected with `buddy hq:connect commshq` sends all of its mail through CommsHQ in production and staging: CommsHQ's addresses are ones mailbox providers already know, it keeps one suppression list, and it limits and screens what goes out. `services.commshq.mail: false` in `config/services.ts` keeps the app's own mailer while staying connected, and `MAIL_MAILER` overrides either for one deployment (`resolveDefaultMailDriver` in `core/email/src/drivers/commshq.ts`).
+
+A service that sends for other domains sets `email.server.relay` (`true` for `from.address`, or a mailbox name such as `'no-reply'`). Its deploy names that mailbox in the mail server's `SMTP_RELAY_ACCOUNTS`. The mail server refuses any author but the signed-in account, except that a relay account may send a message already signed with a DKIM key the author's domain publishes. The service signs each customer's mail with that customer's key (`dkim` on the message); nothing else is trusted.
 
 ### Mail DNS a deploy publishes
 

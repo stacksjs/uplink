@@ -22,7 +22,7 @@ export default new Action({
 
   async handle() {
     const result = await runHealthProbes([
-      { name: 'licenses', run: () => License.where('id', 0).first() },
+      { name: 'licenses', run: async () => License.where('id', 0).first() },
     ], { timeoutMs: 2000 })
 
     for (const [name, check] of Object.entries(result.checks)) {

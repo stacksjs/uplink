@@ -58,7 +58,7 @@ export async function loadDashboard(appDir: string = process.cwd()): Promise<Das
   const [checks, heartbeat, rows] = await Promise.all([
     runChecks(config, appDir),
     readHeartbeat(appDir),
-    Run.orderBy('id', 'desc').limit(50).get() as Promise<Array<Record<string, any>>>,
+    Run.orderBy('id', 'desc').limit(50).get() as Array<Record<string, any>>,
   ])
 
   const live = isLive(heartbeat)
