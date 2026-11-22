@@ -21,7 +21,7 @@ import { detectWorkdir } from '../Uplink/workdir'
 const HEARTBEAT_MS = 15_000
 const RETRY_OPEN_MS = 30_000
 
-async function openMessages(config: ReturnType<typeof loadConfig>, appDir: string, startedAt: number): Promise<MessagesDb> {
+async function openMessagesDatabase(config: ReturnType<typeof loadConfig>, appDir: string, startedAt: number): Promise<MessagesDb> {
   // Without Full Disk Access this fails. Under launchd, exiting would only
   // restart-loop, so wait for the grant instead and say why in the heartbeat.
   for (;;) {
@@ -70,17 +70,7 @@ export default defineCommand((cli) => {
       const appDir = process.cwd()
       const startedAt = Date.now()
 
-      // Replies go through Messages, and a quit Messages is easy to miss from
-      // a phone - so keep it running (in the background) for as long as we are.
-      const keepMessagesOpen = (): void => {
-        if (Bun.spawnSync(['pgrep', '-x', 'Messages']).exitCode !== 0) {
-          console.log('[uplink] Messages was not running; reopening it in the background')
-          Bun.spawnSync(['open', '-g', '-a', 'Messages'])
-        }
-      }
-      keepMessagesOpen()
-
-      const messages = await openMessages(config, appDir, startedAt)
+      const messages = await openMessagesDatabase(config, appDir, startedAt)
       const sender = new AppleScriptSender()
       const uplink = new Uplink({
         config,
@@ -97,18 +87,18 @@ export default defineCommand((cli) => {
       // send has failed, so the doctor and the dashboard report the subject
       // that actually sends rather than whichever terminal ran them.
       let automation = await sender.canSend()
-      if (!automation.ok)
+      if (!automation.ok && automation.reason !== 'closed')
         console.error(`[uplink] cannot send through Messages: ${automation.detail}`)
 
       const beat = async (): Promise<number> => {
-        if (uplink.lastSendError && automation.ok)
+        if (automation.reason === 'closed' || (uplink.lastSendError && automation.ok))
           automation = await sender.canSend()
         return writeHeartbeat(appDir, {
           pid: process.pid,
           startedAt,
           lastPollAt: uplink.lastPollAt,
           lastError: uplink.lastError,
-          automation: { ok: automation.ok, detail: automation.detail },
+          automation,
           lastSendError: uplink.lastSendError,
           allowed: uplink.allowedHandles,
           own: uplink.ownHandles,
@@ -130,7 +120,6 @@ export default defineCommand((cli) => {
 
       await beat()
       setInterval(async () => {
-        keepMessagesOpen()
         await beat()
         if (envChanged && uplink.activeRuns.length === 0) {
           await uplink.stop()

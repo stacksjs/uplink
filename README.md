@@ -47,6 +47,9 @@ iPhone <------------------------- Messages (AppleScript) <------- the reply, as 
 through Full Disk Access, signing in to the agent you picked, and who may text it. Then text
 yourself `ping`.
 
+Messages can stay closed while Uplink waits for texts. Open Messages to verify
+Automation permission during setup. Sending a reply may open Messages if it is closed.
+
 To check what you downloaded, compare it against the digest on the release page, which is also in
 [`resources/data/release.json`](resources/data/release.json):
 

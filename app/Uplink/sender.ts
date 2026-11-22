@@ -24,16 +24,15 @@ export interface ReplyTarget {
  */
 export interface AutomationState {
   ok: boolean
-  reason: 'ok' | 'denied' | 'failed'
+  reason: 'ok' | 'closed' | 'denied' | 'failed'
   detail: string
 }
 
 export interface Sender {
   send: (target: ReplyTarget, text: string) => Promise<void>
   /**
-   * Can this process send at all. The first call raises the macOS Automation
-   * prompt, which is the point of having it: it has to happen while someone is
-   * at the Mac, not on the first real reply to a phone that then hears nothing.
+   * Checks permission against an already running Messages app. This can raise
+   * the macOS Automation prompt while someone is at the Mac.
    */
   canSend: () => Promise<AutomationState>
 }
@@ -60,11 +59,34 @@ end run
 `
 
 /**
- * Reads from Messages and sends nothing, so it can be run during setup and on
- * demand. Counting accounts needs exactly the Automation permission a real
- * reply needs.
+ * Counting accounts needs the same Automation permission as sending. Address
+ * the running process by PID so a permission check cannot launch Messages,
+ * even if it quits between the lookup and the Apple event.
  */
-const PROBE_SCRIPT = 'tell application "Messages" to count of accounts'
+const PROBE_SCRIPT = `
+ObjC.import('AppKit')
+
+function run() {
+  const bundle = 'com.apple.MobileSMS'
+  const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(bundle)
+  if (Number(apps.count) === 0)
+    return 'closed'
+
+  try {
+    const messages = Application(Number(apps.firstObject.processIdentifier))
+    if (!messages.running())
+      return 'closed'
+    messages.accounts()
+    return 'ready'
+  }
+  catch (error) {
+    const remaining = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(bundle)
+    if (Number(remaining.count) === 0)
+      return 'closed'
+    throw error
+  }
+}
+`
 
 /** macOS error -1743 is "not authorized to send Apple events". */
 const NOT_AUTHORIZED = /-1743|not authori[sz]ed|not allowed to send|doesn't have permission/i
@@ -81,15 +103,18 @@ const SEND_TIMEOUT_MS = 45_000
 export class AppleScriptSender implements Sender {
   async canSend(): Promise<AutomationState> {
     try {
-      const proc = Bun.spawn(['osascript', '-e', PROBE_SCRIPT], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
+      const proc = Bun.spawn(['/usr/bin/osascript', '-l', 'JavaScript', '-e', PROBE_SCRIPT], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
       // The prompt itself blocks the script until someone answers it, and a
       // busy or starting Messages can time out on its own, so this waits
       // generously rather than reporting a refusal that has not happened.
       const timer = setTimeout(() => proc.kill(), PROBE_TIMEOUT_MS)
-      const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
+      const [code, stdout, stderr] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()])
       clearTimeout(timer)
 
-      if (code === 0)
+      if (code === 0 && stdout.trim() === 'closed')
+        return { ok: false, reason: 'closed', detail: 'Open Messages to verify that Uplink can send replies.' }
+
+      if (code === 0 && stdout.trim() === 'ready')
         return { ok: true, reason: 'ok', detail: 'Uplink can send through Messages' }
 
       const said = stderr.trim()

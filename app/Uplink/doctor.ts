@@ -1,5 +1,6 @@
 import type { UplinkConfig } from './config'
 import type { Engine, ProbeReason } from './engine'
+import type { AutomationState } from './sender'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { allEngines } from './engines'
@@ -36,7 +37,7 @@ export interface Heartbeat {
   lastPollAt: number | null
   lastError: string | null
   /** Whether the watcher itself can drive Messages. Null before it has asked. */
-  automation: { ok: boolean, detail: string } | null
+  automation: { ok: boolean, detail: string, reason?: AutomationState['reason'] } | null
   /** Why the last reply could not be delivered, if one could not. */
   lastSendError: string | null
   allowed: string[]
@@ -152,7 +153,7 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
   const messages = Bun.spawnSync(['pgrep', '-x', 'Messages'])
   checks.push(messages.exitCode === 0
     ? { name: 'Messages app', ok: true, detail: 'running' }
-    : { name: 'Messages app', ok: false, detail: 'not running', fix: 'Open Messages and sign in with your Apple ID' })
+    : { name: 'Messages app', ok: false, detail: 'closed', informational: true })
 
   // The Automation grant is per app: the watcher inside Uplink.app and this
   // command under Terminal are different subjects. Only the watcher's answer is
@@ -161,7 +162,9 @@ export async function runChecks(config: UplinkConfig, appDir: string): Promise<C
   if (fresh && heartbeat.automation) {
     checks.push(heartbeat.automation.ok
       ? { name: 'Sending replies', ok: true, detail: heartbeat.automation.detail }
-      : {
+      : heartbeat.automation.reason === 'closed' && !heartbeat.lastSendError
+        ? { name: 'Sending replies', ok: false, detail: heartbeat.automation.detail, informational: true }
+        : {
           name: 'Sending replies',
           ok: false,
           detail: heartbeat.lastSendError ?? heartbeat.automation.detail,

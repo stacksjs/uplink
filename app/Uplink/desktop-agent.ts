@@ -322,9 +322,8 @@ export async function startDesktopAgent(options: { version: string, session?: st
       messagesError = error instanceof MessagesAccessError ? 'Uplink needs Full Disk Access to read Messages.' : String(error)
       return
     }
-    // Messages is open either way - setup needs it for Full Disk Access and
-    // for finding this Mac's own numbers - but texts are answered only on a
-    // license.
+    // Reading chat.db only needs Full Disk Access. Texts are answered only on
+    // a license, whether or not the Messages app is open.
     if (!isLicensed(license))
       return
     // `engineFor` as well as `engine`, so a thread that texts "codex" can
@@ -404,13 +403,10 @@ export async function startDesktopAgent(options: { version: string, session?: st
       advanceSetup()
   }, RETRY_OPEN_MS)
 
-  const keepMessagesOpen = setInterval(() => {
-    if (uplink && Bun.spawnSync(['pgrep', '-x', 'Messages']).exitCode !== 0)
-      Bun.spawnSync(['open', '-g', '-a', 'Messages'])
-    // Re-ask while the answer is anything but yes. A refusal only changes in
-    // System Settings, and a timeout from a Messages that was still starting
-    // should not leave the app stuck in setup for ever.
-    if (messages && automation && !automation.ok)
+  const recheckAutomation = setInterval(() => {
+    // An unopened or busy Messages should not leave setup stuck. The probe
+    // only contacts a running process, so retries leave a closed app alone.
+    if (!settings.paused && messages && automation && !automation.ok)
       void checkAutomation()
   }, 15_000)
 
@@ -503,7 +499,7 @@ export async function startDesktopAgent(options: { version: string, session?: st
           ?? (checkingAutomation && !automation?.ok
             ? 'Click OK in the macOS prompt to let Uplink use Messages.'
             : automation?.detail ?? 'Uplink asks for this once the steps above are done.'),
-        informational: false,
+        informational: automation?.reason === 'closed' && !uplink?.lastSendError,
       },
     ]
     // An engine the person has not selected must not hold the app in setup.
@@ -706,7 +702,7 @@ export async function startDesktopAgent(options: { version: string, session?: st
       clearInterval(retry)
       clearInterval(recheckLicense)
       signIn.cancel()
-      clearInterval(keepMessagesOpen)
+      clearInterval(recheckAutomation)
       await uplink?.stop()
       server.stop(true)
       store.close()
