@@ -87,7 +87,7 @@
     "docs:agent-counts:check": "./buddy docs:agent-counts:check"
   },
   "dependencies": {
-    "stacks": "^0.75.632",
+    "stacks": "^0.75.652",
     "stripe": "23.0.0"
   },
   "workspaces": [
