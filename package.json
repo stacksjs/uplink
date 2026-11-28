@@ -88,7 +88,7 @@
   },
   "dependencies": {
     "stacks": "^0.75.652",
-    "stripe": "23.0.0"
+    "stripe": "23.2.0"
   },
   "workspaces": [
     "storage/framework",
